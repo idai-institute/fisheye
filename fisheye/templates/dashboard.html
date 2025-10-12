@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>fisheye dashboard</title>
+    <style>
+      body { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; margin: 1rem; background: #f2f5f8; color: #0b1d2a; }
+      h1, h2 { margin-bottom: .3rem; }
+      .grid { display: grid; grid-template-columns: 1fr; gap: 1rem; }
+      table { width: 100%; border-collapse: collapse; background: white; }
+      th, td { border: 1px solid #dbe3ea; padding: .45rem; text-align: left; font-size: .92rem; }
+      th { background: #edf3f9; }
+      .card { border: 1px solid #dbe3ea; border-radius: 8px; padding: 1rem; background: white; }
+      @media (min-width: 1000px) { .grid { grid-template-columns: 1.2fr 1fr; } }
+    </style>
+  </head>
+  <body>
+    <h1>fisheye dashboard</h1>
+    <div class="grid">
+      <section class="card">
+        <h2>Recent Alerts</h2>
+        <table>
+          <thead>
+            <tr><th>timestamp</th><th>category</th><th>score</th><th>agent</th><th>run</th></tr>
+          </thead>
+          <tbody>
+            {% for item in alerts %}
+              <tr>
+                <td>{{ item.timestamp }}</td>
+                <td>{{ item.category }}</td>
+                <td>{{ '%.3f' | format(item.score) }}</td>
+                <td>{{ item.agent_id }}</td>
+                <td>{{ item.run_id }}</td>
+              </tr>
+            {% else %}
+              <tr><td colspan="5">No alerts</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </section>
+
+      <section class="card">
+        <h2>Runs</h2>
+        <table>
+          <thead>
+            <tr><th>run_id</th><th>agent_id</th><th>first_seen</th><th>last_seen</th><th>events</th></tr>
+          </thead>
+          <tbody>
+            {% for item in runs %}
+              <tr>
+                <td>{{ item.run_id }}</td>
+                <td>{{ item.agent_id }}</td>
+                <td>{{ item.first_seen }}</td>
+                <td>{{ item.last_seen }}</td>
+                <td>{{ item.event_count }}</td>
+              </tr>
+            {% else %}
+              <tr><td colspan="5">No runs</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </section>
+    </div>
+  </body>
+</html>
