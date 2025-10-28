@@ -12,6 +12,7 @@ from fisheye.detectors.dos import DoSDetector
 from fisheye.detectors.engine import DetectorEngine
 from fisheye.detectors.exfiltration import DataExfiltrationDetector
 from fisheye.preprocessors.base import Preprocessor
+from fisheye.preprocessors.buffering import BufferingPreprocessor
 from fisheye.preprocessors.hashing import HashFingerprintPreprocessor
 from fisheye.preprocessors.pipeline import PreprocessorPipeline
 from fisheye.preprocessors.redaction import PIIRedactionPreprocessor, SecretRedactionPreprocessor
@@ -124,6 +125,14 @@ def _build_preprocessor_pipeline(
     include_redaction: bool,
 ) -> PreprocessorPipeline:
     preprocessors: list[Preprocessor] = []
+
+    if config.preprocessors.enable_buffering:
+        preprocessors.append(
+            BufferingPreprocessor(
+                max_events=config.preprocessors.buffering_max_events,
+                max_seconds=config.preprocessors.buffering_max_seconds,
+            )
+        )
 
     if config.preprocessors.enable_secret_redaction:
         preprocessors.append(SecretRedactionPreprocessor())

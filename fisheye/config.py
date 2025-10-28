@@ -32,6 +32,9 @@ class ThresholdConfig:
 
 @dataclass(slots=True)
 class PreprocessorConfig:
+    enable_buffering: bool = False
+    buffering_max_events: int = 20
+    buffering_max_seconds: float = 2.0
     enable_secret_redaction: bool = False
     enable_pii_redaction: bool = False
     enable_hashing: bool = True
