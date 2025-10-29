@@ -6,6 +6,7 @@ from typing import Any
 from uuid import uuid4
 
 from fisheye.collectors.base import AlertSink, Collector
+from fisheye.collectors.sqlite_store import SQLiteStore
 from fisheye.detectors.base import Detector, DetectorSignal
 from fisheye.detectors.score_aggregation import combine_signals
 from fisheye.schema.alerts import Alert
@@ -18,11 +19,13 @@ class DetectorEngine(Collector):
     def __init__(
         self,
         detectors: list[Detector],
+        store: SQLiteStore | None = None,
         alert_sinks: list[AlertSink] | None = None,
         thresholds: dict[str, float] | None = None,
         detector_weights: dict[str, float] | None = None,
     ) -> None:
         self.detectors = detectors
+        self.store = store
         self.alert_sinks = alert_sinks or []
         self.thresholds = thresholds or {
             "data_exfiltration": 0.7,
@@ -42,6 +45,8 @@ class DetectorEngine(Collector):
             if signal is None:
                 continue
             signals.append(signal)
+            if self.store:
+                await self.store.record_detector_signal(signal, event)
 
         if not signals:
             return
@@ -76,6 +81,8 @@ class DetectorEngine(Collector):
             await self._emit_alert(alert)
 
     async def _emit_alert(self, alert: Alert) -> None:
+        if self.store:
+            await self.store.handle_alert(alert)
         for sink in self.alert_sinks:
             await sink.handle_alert(alert)
 

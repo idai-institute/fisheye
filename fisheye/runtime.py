@@ -7,6 +7,7 @@ from fisheye.bus.async_bus import AsyncEventBus
 from fisheye.bus.routing import Route, RouteMode, Router
 from fisheye.collectors.base import Collector
 from fisheye.collectors.jsonl_logger import JsonlLoggerCollector
+from fisheye.collectors.sqlite_store import SQLiteStore
 from fisheye.config import FisheyeConfig
 from fisheye.detectors.dos import DoSDetector
 from fisheye.detectors.engine import DetectorEngine
@@ -28,6 +29,7 @@ class FisheyeRuntime:
         bus: AsyncEventBus,
         preprocessor_pipeline: PreprocessorPipeline | None = None,
         preprocessor_pipelines: dict[RouteMode, PreprocessorPipeline] | None = None,
+        store: SQLiteStore | None = None,
     ) -> None:
         self.bus = bus
         if preprocessor_pipelines is not None:
@@ -37,6 +39,7 @@ class FisheyeRuntime:
         else:
             self.preprocessor_pipelines = {"raw": PreprocessorPipeline([])}
 
+        self.store = store
         self.collectors: list[Collector] = []
         self.router = Router()
         self._started = False
@@ -149,6 +152,7 @@ def _build_preprocessor_pipeline(
 def build_default_runtime(config: FisheyeConfig | None = None) -> FisheyeRuntime:
     config = config or FisheyeConfig()
 
+    store = SQLiteStore(Path(config.storage.sqlite_path))
     logger = JsonlLoggerCollector(
         events_path=config.storage.events_jsonl_path,
         alerts_path=config.storage.alerts_jsonl_path,
@@ -159,6 +163,7 @@ def build_default_runtime(config: FisheyeConfig | None = None) -> FisheyeRuntime
             DataExfiltrationDetector(),
             DoSDetector(),
         ],
+        store=store,
         alert_sinks=[logger],
         thresholds={
             "data_exfiltration": config.thresholds.data_exfiltration,
@@ -173,8 +178,10 @@ def build_default_runtime(config: FisheyeConfig | None = None) -> FisheyeRuntime
             default_retries=config.bus.retry_attempts,
         ),
         preprocessor_pipelines={"raw": _build_preprocessor_pipeline(config, include_redaction=True)},
+        store=store,
     )
 
+    runtime.register_collector(store, mode="raw")
     runtime.register_collector(detector_engine, mode="raw")
     runtime.register_collector(logger, mode="raw")
 

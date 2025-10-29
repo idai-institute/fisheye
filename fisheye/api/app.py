@@ -20,6 +20,8 @@ def create_app(runtime: FisheyeRuntime | None = None, config: FisheyeConfig | No
             yield
         finally:
             await runtime.stop()
+            if runtime.store:
+                runtime.store.close()
 
     app = FastAPI(title="fisheye", version="0.1.0", lifespan=lifespan)
     register_routes(app, runtime, api_key=api_key)

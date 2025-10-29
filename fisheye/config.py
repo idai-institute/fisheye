@@ -7,6 +7,7 @@ from typing import Any
 
 @dataclass(slots=True)
 class StorageConfig:
+    sqlite_path: Path = Path("./fisheye.db")
     events_jsonl_path: Path = Path("./fisheye-events.jsonl")
     alerts_jsonl_path: Path = Path("./fisheye-alerts.jsonl")
 
