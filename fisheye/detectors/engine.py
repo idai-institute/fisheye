@@ -28,6 +28,7 @@ class DetectorEngine(Collector):
         self.store = store
         self.alert_sinks = alert_sinks or []
         self.thresholds = thresholds or {
+            "prompt_injection": 0.7,
             "data_exfiltration": 0.7,
             "dos": 0.7,
         }

@@ -12,6 +12,7 @@ from fisheye.config import FisheyeConfig
 from fisheye.detectors.dos import DoSDetector
 from fisheye.detectors.engine import DetectorEngine
 from fisheye.detectors.exfiltration import DataExfiltrationDetector
+from fisheye.detectors.prompt_injection import PromptInjectionDetector
 from fisheye.preprocessors.base import Preprocessor
 from fisheye.preprocessors.buffering import BufferingPreprocessor
 from fisheye.preprocessors.hashing import HashFingerprintPreprocessor
@@ -160,12 +161,14 @@ def build_default_runtime(config: FisheyeConfig | None = None) -> FisheyeRuntime
 
     detector_engine = DetectorEngine(
         detectors=[
+            PromptInjectionDetector(),
             DataExfiltrationDetector(),
             DoSDetector(),
         ],
         store=store,
         alert_sinks=[logger],
         thresholds={
+            "prompt_injection": config.thresholds.prompt_injection,
             "data_exfiltration": config.thresholds.data_exfiltration,
             "dos": config.thresholds.dos,
         },

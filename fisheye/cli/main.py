@@ -45,7 +45,7 @@ def _base_parser() -> argparse.ArgumentParser:
 
     demo = sub.add_parser("demo", help="Generate synthetic attack scenarios")
     demo_sub = demo.add_subparsers(dest="demo_command", required=True)
-    demo_sub.add_parser("attack-scenarios", help="Emit exfiltration/dos examples")
+    demo_sub.add_parser("attack-scenarios", help="Emit prompt injection/exfiltration/dos examples")
 
     return parser
 

@@ -6,7 +6,7 @@ from uuid import uuid4
 
 from pydantic import BaseModel, Field, field_validator
 
-AlertCategory = Literal["data_exfiltration", "dos"]
+AlertCategory = Literal["prompt_injection", "data_exfiltration", "dos"]
 
 
 class Alert(BaseModel):
