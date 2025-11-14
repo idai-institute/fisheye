@@ -115,6 +115,8 @@ class DoSDetector(Detector):
     def _analyze_tokens(self, event: EventEnvelope) -> DetectorSignal | None:
         value = event.payload.get("token_count")
         if value is None:
+            value = event.meta.get("features", {}).get("approx_tokens")
+        if value is None:
             return None
 
         try:
