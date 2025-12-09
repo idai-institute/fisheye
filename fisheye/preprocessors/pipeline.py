@@ -9,7 +9,7 @@ class PreprocessorPipeline:
         self.preprocessors = preprocessors or []
 
     async def process(self, event: EventEnvelope) -> list[EventEnvelope]:
-        events: list[EventEnvelope] = []
+        events: list[EventEnvelope] = [event]
         for preprocessor in self.preprocessors:
             next_events: list[EventEnvelope] = []
             for candidate in events:
