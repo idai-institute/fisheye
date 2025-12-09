@@ -32,7 +32,7 @@ class StatisticalBehaviorMonitor(Collector):
 
         self._tool_call_times: dict[tuple[str, str], deque[datetime]] = defaultdict(deque)
         self._event_outcomes: dict[str, deque[tuple[datetime, int]]] = defaultdict(deque)
-        self._tool_recent: dict[str, deque[str]] = defaultdict(lambda: deque(maxlen=50))
+        self._tool_recent: dict[str, deque[str]] = defaultdict(lambda: deque(maxlen=100))
 
         self._tool_rate_stats: dict[tuple[str, str], EwmaTracker] = defaultdict(EwmaTracker)
         self._latency_stats: dict[tuple[str, str], EwmaTracker] = defaultdict(EwmaTracker)
