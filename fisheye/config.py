@@ -40,6 +40,7 @@ class PreprocessorConfig:
     enable_secret_redaction: bool = False
     enable_pii_redaction: bool = False
     enable_hashing: bool = True
+    enable_features: bool = True
     enable_url_extraction: bool = False
 
 
