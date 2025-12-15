@@ -31,6 +31,7 @@ class DetectorEngine(Collector):
             "prompt_injection": 0.7,
             "data_exfiltration": 0.7,
             "dos": 0.7,
+            "behavioral": 0.75,
         }
         self.detector_weights = detector_weights or {}
         self._contexts: dict[str, dict[str, Any]] = {detector.detector_id: {} for detector in detectors}

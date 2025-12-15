@@ -30,6 +30,7 @@ class ThresholdConfig:
     prompt_injection: float = 0.7
     data_exfiltration: float = 0.7
     dos: float = 0.7
+    behavioral: float = 0.75
 
 
 @dataclass(slots=True)
