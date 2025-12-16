@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from fisheye.behavior.monitor import StatisticalBehaviorMonitor
 from fisheye.bus.async_bus import AsyncEventBus
 from fisheye.bus.routing import Route, RouteMode, Router
 from fisheye.collectors.base import Collector
@@ -171,8 +172,15 @@ def build_default_runtime(config: FisheyeConfig | None = None) -> FisheyeRuntime
             "prompt_injection": config.thresholds.prompt_injection,
             "data_exfiltration": config.thresholds.data_exfiltration,
             "dos": config.thresholds.dos,
+            "behavioral": config.thresholds.behavioral,
         },
         detector_weights=config.detector_weights,
+    )
+
+    behavior_monitor = StatisticalBehaviorMonitor(
+        store=store,
+        alert_sinks=[logger],
+        threshold=config.thresholds.behavioral,
     )
 
     runtime = FisheyeRuntime(
@@ -186,9 +194,11 @@ def build_default_runtime(config: FisheyeConfig | None = None) -> FisheyeRuntime
 
     runtime.register_collector(store, mode="raw")
     runtime.register_collector(detector_engine, mode="raw")
+    runtime.register_collector(behavior_monitor, mode="raw")
     runtime.register_collector(logger, mode="raw")
 
     runtime.detector_engine = detector_engine  # type: ignore[attr-defined]
+    runtime.behavior_monitor = behavior_monitor  # type: ignore[attr-defined]
     runtime.logger = logger  # type: ignore[attr-defined]
     runtime.config = config  # type: ignore[attr-defined]
     return runtime
