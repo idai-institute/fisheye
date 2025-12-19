@@ -38,7 +38,7 @@ class AsyncEventBus:
         for pattern in patterns:
             if pattern == event_type:
                 return True
-            if pattern.endswith("*") and event_type.endswith(pattern[:-1]):
+            if pattern.endswith("*") and event_type.startswith(pattern[:-1]):
                 return True
         return False
 
