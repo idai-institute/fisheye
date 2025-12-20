@@ -15,7 +15,7 @@ class StorageConfig:
 @dataclass(slots=True)
 class BusConfig:
     queue_size: int = 1000
-    retry_attempts: int = 0
+    retry_attempts: int = 1
 
 
 @dataclass(slots=True)
