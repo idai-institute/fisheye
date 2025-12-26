@@ -59,7 +59,7 @@ class DoSDetector(Detector):
         times: deque = run_state["tool_call_times"]
         times.append(now)
 
-        while times and (now - times[0]) >= self.burst_window:
+        while times and (now - times[0]) > self.burst_window:
             times.popleft()
 
         signature = self._signature(event)
