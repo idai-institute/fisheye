@@ -100,8 +100,9 @@ class FisheyeRuntime:
         if pipeline is None:
             return
 
-        await pipeline.process(normalized)
-        await self.bus.publish(normalized)
+        processed = await pipeline.process(normalized)
+        for candidate in processed:
+            await self.bus.publish(candidate)
 
     async def ingest(self, events: list[EventEnvelope | dict[str, Any]]) -> None:
         for event in events:
