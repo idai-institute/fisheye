@@ -42,7 +42,7 @@ class PreprocessorConfig:
     enable_pii_redaction: bool = False
     enable_hashing: bool = True
     enable_features: bool = False
-    enable_url_extraction: bool = False
+    enable_url_extraction: bool = True
 
 
 @dataclass(slots=True)
