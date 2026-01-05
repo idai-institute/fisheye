@@ -27,7 +27,7 @@ def register_routes(app: FastAPI, runtime: Any, api_key: str | None = None) -> N
     async def ingest_events(payload: dict[str, Any] | list[dict[str, Any]], _: None = Depends(_auth)) -> dict[str, Any]:
         events_raw = payload if isinstance(payload, list) else [payload]
         events = [EventEnvelope.model_validate(item) for item in events_raw]
-        ingested = await ingest_service.ingest(events_raw)
+        ingested = await ingest_service.ingest(events)
         await runtime.drain(timeout=2.0)
         return {"ingested": ingested}
 
