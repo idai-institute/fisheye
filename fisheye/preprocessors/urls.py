@@ -19,7 +19,7 @@ class URLDomainExtractionPreprocessor(Preprocessor):
             for match in URL_PATTERN.finditer(text):
                 url = match.group(0)
                 urls.append(url)
-                host = urlparse(url).netloc or ""
+                host = urlparse(url).hostname or ""
                 if host:
                     domains.add(host)
 
