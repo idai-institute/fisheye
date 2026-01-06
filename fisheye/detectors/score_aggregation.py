@@ -14,7 +14,7 @@ def combine_signals(
     residual = 1.0
 
     for signal in signals:
-        weight = weights.get(signal.detector_id, 1.0)
+        weight = weights.get(signal.detector_id, 0.0)
         weighted = clamp(signal.score * weight)
         residual *= 1.0 - weighted
 
