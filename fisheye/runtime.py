@@ -25,6 +25,21 @@ from fisheye.schema.events import EventEnvelope
 _ROUTE_MODE_META_KEY = "_route_mode"
 
 
+class _RoutedCollector(Collector):
+    def __init__(self, collector: Collector, mode: RouteMode) -> None:
+        self.collector = collector
+        self.mode = mode
+        self.name = getattr(collector, "name", collector.__class__.__name__)
+
+    async def handle_event(self, event: EventEnvelope) -> None:
+        if event.meta.get(_ROUTE_MODE_META_KEY) != self.mode:
+            return
+
+        forwarded = event.model_copy(deep=True)
+        forwarded.meta.pop(_ROUTE_MODE_META_KEY, None)
+        await self.collector.handle_event(forwarded)
+
+
 class FisheyeRuntime:
     def __init__(
         self,
@@ -65,7 +80,8 @@ class FisheyeRuntime:
         if patterns is None and resolved_route.event_pattern != "*":
             patterns = (resolved_route.event_pattern,)
 
-        sub_id = self.bus.subscribe(collector, event_types=patterns, max_retries=max_retries)
+        wrapped = _RoutedCollector(collector, resolved_route.mode)
+        sub_id = self.bus.subscribe(wrapped, event_types=patterns, max_retries=max_retries)
         self.router.add_route(sub_id, resolved_route)
         self.collectors.append(collector)
         return sub_id
@@ -80,10 +96,14 @@ class FisheyeRuntime:
         if not self._started:
             return
 
-        pipeline = self.preprocessor_pipelines.get("raw")
-        if pipeline is not None:
+        for mode in sorted(self._active_modes()):
+            pipeline = self.preprocessor_pipelines.get(mode)
+            if pipeline is None:
+                continue
+
             flushed = await pipeline.flush()
             for event in flushed:
+                event.meta[_ROUTE_MODE_META_KEY] = mode
                 await self.bus.publish(event)
 
         await self.bus.drain(timeout=2.0)
@@ -102,6 +122,7 @@ class FisheyeRuntime:
 
         processed = await pipeline.process(normalized)
         for candidate in processed:
+            candidate.meta[_ROUTE_MODE_META_KEY] = "raw"
             await self.bus.publish(candidate)
 
     async def ingest(self, events: list[EventEnvelope | dict[str, Any]]) -> None:
@@ -140,9 +161,9 @@ def _build_preprocessor_pipeline(
             )
         )
 
-    if config.preprocessors.enable_secret_redaction:
+    if include_redaction and config.preprocessors.enable_secret_redaction:
         preprocessors.append(SecretRedactionPreprocessor())
-    if config.preprocessors.enable_pii_redaction:
+    if include_redaction and config.preprocessors.enable_pii_redaction:
         preprocessors.append(PIIRedactionPreprocessor())
 
     if config.preprocessors.enable_hashing:
@@ -189,14 +210,17 @@ def build_default_runtime(config: FisheyeConfig | None = None) -> FisheyeRuntime
             queue_size=config.bus.queue_size,
             default_retries=config.bus.retry_attempts,
         ),
-        preprocessor_pipelines={"raw": _build_preprocessor_pipeline(config, include_redaction=True)},
+        preprocessor_pipelines={
+            "raw": _build_preprocessor_pipeline(config, include_redaction=False),
+            "redacted": _build_preprocessor_pipeline(config, include_redaction=True),
+        },
         store=store,
     )
 
     runtime.register_collector(store, mode="raw")
     runtime.register_collector(detector_engine, mode="raw")
     runtime.register_collector(behavior_monitor, mode="raw")
-    runtime.register_collector(logger, mode="raw")
+    runtime.register_collector(logger, mode="redacted")
 
     runtime.detector_engine = detector_engine  # type: ignore[attr-defined]
     runtime.behavior_monitor = behavior_monitor  # type: ignore[attr-defined]

@@ -30,14 +30,19 @@ class _DummyRuntime:
 
 def test_routing_modes() -> None:
     raw_collector = _RecordingCollector()
+    redacted_collector = _RecordingCollector()
 
     runtime = FisheyeRuntime(
         bus=AsyncEventBus(),
-        preprocessor_pipelines={"raw": PreprocessorPipeline([])},
+        preprocessor_pipelines={
+            "raw": PreprocessorPipeline([]),
+            "redacted": PreprocessorPipeline([]),
+        },
     )
 
-    async def _run() -> list:
+    async def _run() -> tuple[list, list]:
         runtime.register_collector(raw_collector, mode="raw")
+        runtime.register_collector(redacted_collector, mode="redacted")
         await runtime.start()
         await runtime.publish(
             {
@@ -49,11 +54,13 @@ def test_routing_modes() -> None:
         )
         await runtime.drain(timeout=2.0)
         await runtime.stop()
-        return raw_collector.events
+        return raw_collector.events, redacted_collector.events
 
-    raw_events = asyncio.run(_run())
+    raw_events, redacted_events = asyncio.run(_run())
     assert raw_events
+    assert redacted_events
     assert raw_events[0].payload["message"] == "keep this raw"
+    assert redacted_events[0].payload["message"] == "keep this raw"
 
 
 def test_langchain_callback_handler_dispatches_events() -> None:
