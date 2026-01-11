@@ -37,5 +37,5 @@ class FeatureOnlyProjectionPreprocessor(Preprocessor):
             "domains": event.meta.get("domains", []),
             "original_payload_bytes": original_size,
         }
-        event.meta["compact_payload"] = True
+        event.meta["feature_only"] = True
         return [event]
