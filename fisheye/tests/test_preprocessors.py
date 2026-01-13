@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 
+from fisheye.preprocessors.embeddings import EmbeddingPreprocessor
 from fisheye.preprocessors.hashing import HashFingerprintPreprocessor
 from fisheye.preprocessors.redaction import PIIRedactionPreprocessor, SecretRedactionPreprocessor
 from fisheye.preprocessors.urls import URLDomainExtractionPreprocessor
@@ -57,3 +58,18 @@ def test_url_domain_extraction() -> None:
     out = asyncio.run(_run())
     assert "example.com" in out.meta["domains"]
 
+
+def test_embedding_preprocessor_local_backend() -> None:
+    event = EventEnvelope(
+        event_type="llm.request",
+        agent_id="agent",
+        run_id="run",
+        payload={"message": "this is a real embedding signal"},
+    )
+
+    async def _run() -> EventEnvelope:
+        return (await EmbeddingPreprocessor().process(event))[0]
+
+    out = asyncio.run(_run())
+    assert "embedding" in out.meta
+    assert len(out.meta["embedding"]) == 64
