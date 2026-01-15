@@ -43,6 +43,9 @@ class PreprocessorConfig:
     enable_hashing: bool = True
     enable_features: bool = False
     enable_url_extraction: bool = True
+    enable_embeddings: bool = False
+    embedding_provider: str = "local_hash"
+    embedding_dimensions: int = 64
 
 
 @dataclass(slots=True)

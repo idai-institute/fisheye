@@ -16,6 +16,7 @@ from fisheye.detectors.exfiltration import DataExfiltrationDetector
 from fisheye.detectors.prompt_injection import PromptInjectionDetector
 from fisheye.preprocessors.base import Preprocessor
 from fisheye.preprocessors.buffering import BufferingPreprocessor
+from fisheye.preprocessors.embeddings import EmbeddingPreprocessor, LocalHashEmbeddingProvider, NoopEmbeddingProvider
 from fisheye.preprocessors.hashing import HashFingerprintPreprocessor
 from fisheye.preprocessors.pipeline import PreprocessorPipeline
 from fisheye.preprocessors.redaction import PIIRedactionPreprocessor, SecretRedactionPreprocessor
@@ -146,6 +147,15 @@ class FisheyeRuntime:
         return {"raw"}
 
 
+def _build_embedding_provider(config: FisheyeConfig) -> LocalHashEmbeddingProvider | NoopEmbeddingProvider:
+    provider = config.preprocessors.embedding_provider.lower()
+    if provider == "local_hash":
+        return LocalHashEmbeddingProvider(config.preprocessors.embedding_dimensions)
+    if provider == "noop":
+        return NoopEmbeddingProvider()
+    raise ValueError(f"Unsupported embedding_provider: {provider}")
+
+
 def _build_preprocessor_pipeline(
     config: FisheyeConfig,
     *,
@@ -170,6 +180,9 @@ def _build_preprocessor_pipeline(
         preprocessors.append(HashFingerprintPreprocessor())
     if config.preprocessors.enable_url_extraction:
         preprocessors.append(URLDomainExtractionPreprocessor())
+    if config.preprocessors.enable_embeddings:
+        preprocessors.append(EmbeddingPreprocessor(provider=_build_embedding_provider(config)))
+
     return PreprocessorPipeline(preprocessors)
 
 
