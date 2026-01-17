@@ -16,7 +16,7 @@ def register_routes(app: FastAPI, runtime: Any, api_key: str | None = None) -> N
     async def _auth(x_api_key: Annotated[str | None, Header(alias="X-API-Key")] = None) -> None:
         if api_key is None:
             return
-        if x_api_key == api_key:
+        if x_api_key != api_key:
             raise HTTPException(status_code=401, detail="Invalid API key")
 
     @app.get("/v1/health")
