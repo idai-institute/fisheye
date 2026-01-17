@@ -117,14 +117,16 @@ class FisheyeRuntime:
 
         normalized = event if isinstance(event, EventEnvelope) else EventEnvelope.model_validate(event)
 
-        pipeline = self.preprocessor_pipelines.get("raw")
-        if pipeline is None:
-            return
+        for mode in sorted(self._active_modes()):
+            pipeline = self.preprocessor_pipelines.get(mode)
+            if pipeline is None:
+                continue
 
-        processed = await pipeline.process(normalized)
-        for candidate in processed:
-            candidate.meta[_ROUTE_MODE_META_KEY] = "raw"
-            await self.bus.publish(candidate)
+            seed = normalized.model_copy(deep=True)
+            processed = await pipeline.process(seed)
+            for candidate in processed:
+                candidate.meta[_ROUTE_MODE_META_KEY] = mode
+                await self.bus.publish(candidate)
 
     async def ingest(self, events: list[EventEnvelope | dict[str, Any]]) -> None:
         for event in events:
