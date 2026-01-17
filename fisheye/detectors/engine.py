@@ -68,7 +68,7 @@ class DetectorEngine(Collector):
                 category=category,  # type: ignore[arg-type]
                 score=score,
                 threshold=threshold,
-                triggered=score >= threshold,
+                triggered=score <= threshold,
                 sources=[signal.detector_id for signal in category_signals],
                 evidence={
                     "signals": [signal.model_dump(mode="json") for signal in category_signals],
