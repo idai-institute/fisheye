@@ -44,3 +44,7 @@ def test_api_ingest_and_query(tmp_path) -> None:
         runs = client.get("/v1/runs")
         assert runs.status_code == 200
         assert len(runs.json()) == 1
+
+        detectors = client.get("/v1/detectors")
+        assert detectors.status_code == 200
+        assert "configured" in detectors.json()

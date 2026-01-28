@@ -59,6 +59,13 @@ def register_routes(app: FastAPI, runtime: Any, api_key: str | None = None) -> N
     async def run_alerts(run_id: str, limit: int = 200, _: None = Depends(_auth)) -> list[dict[str, Any]]:
         return await runtime.store.get_run_alerts(run_id=run_id, limit=limit)
 
+    @app.get("/v1/detectors")
+    async def list_detectors(_: None = Depends(_auth)) -> dict[str, Any]:
+        engine = getattr(runtime, "detector_engine", None)
+        detectors = engine.list_detector_ids() if engine else []
+        observed = await runtime.store.list_detectors()
+        return {"configured": detectors, "observed": observed}
+
     @app.get("/v1/metrics")
     async def metrics(_: None = Depends(_auth)) -> dict[str, Any]:
         return runtime.metrics
