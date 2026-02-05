@@ -146,7 +146,7 @@ class FisheyeRuntime:
         modes = self.router.active_modes()
         if modes:
             return modes
-        return {"raw"}
+        return set(self.preprocessor_pipelines)
 
 
 def _build_embedding_provider(config: FisheyeConfig) -> LocalHashEmbeddingProvider | NoopEmbeddingProvider:
