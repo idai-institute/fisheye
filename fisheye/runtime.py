@@ -17,6 +17,7 @@ from fisheye.detectors.prompt_injection import PromptInjectionDetector
 from fisheye.preprocessors.base import Preprocessor
 from fisheye.preprocessors.buffering import BufferingPreprocessor
 from fisheye.preprocessors.embeddings import EmbeddingPreprocessor, LocalHashEmbeddingProvider, NoopEmbeddingProvider
+from fisheye.preprocessors.features import FeatureExtractionPreprocessor
 from fisheye.preprocessors.hashing import HashFingerprintPreprocessor
 from fisheye.preprocessors.pipeline import PreprocessorPipeline
 from fisheye.preprocessors.redaction import PIIRedactionPreprocessor, SecretRedactionPreprocessor
@@ -180,6 +181,8 @@ def _build_preprocessor_pipeline(
 
     if config.preprocessors.enable_hashing:
         preprocessors.append(HashFingerprintPreprocessor())
+    if config.preprocessors.enable_features:
+        preprocessors.append(FeatureExtractionPreprocessor())
     if config.preprocessors.enable_url_extraction:
         preprocessors.append(URLDomainExtractionPreprocessor())
     if config.preprocessors.enable_embeddings:

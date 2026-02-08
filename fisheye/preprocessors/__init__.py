@@ -1,6 +1,7 @@
 from fisheye.preprocessors.base import Preprocessor
 from fisheye.preprocessors.buffering import BufferingPreprocessor
 from fisheye.preprocessors.embeddings import EmbeddingPreprocessor, LocalHashEmbeddingProvider
+from fisheye.preprocessors.features import FeatureExtractionPreprocessor, FeatureOnlyProjectionPreprocessor
 from fisheye.preprocessors.hashing import HashFingerprintPreprocessor
 from fisheye.preprocessors.pipeline import PreprocessorPipeline
 from fisheye.preprocessors.redaction import PIIRedactionPreprocessor, SecretRedactionPreprocessor
@@ -11,6 +12,8 @@ __all__ = [
     "BufferingPreprocessor",
     "EmbeddingPreprocessor",
     "LocalHashEmbeddingProvider",
+    "FeatureExtractionPreprocessor",
+    "FeatureOnlyProjectionPreprocessor",
     "HashFingerprintPreprocessor",
     "PreprocessorPipeline",
     "PIIRedactionPreprocessor",
