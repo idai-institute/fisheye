@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 
 from fisheye.preprocessors.embeddings import EmbeddingPreprocessor
+from fisheye.preprocessors.features import FeatureExtractionPreprocessor
 from fisheye.preprocessors.hashing import HashFingerprintPreprocessor
 from fisheye.preprocessors.redaction import PIIRedactionPreprocessor, SecretRedactionPreprocessor
 from fisheye.preprocessors.urls import URLDomainExtractionPreprocessor
@@ -29,7 +30,7 @@ def test_secret_and_pii_redaction() -> None:
     assert "api_key=" not in out.payload["message"].lower()
 
 
-def test_hash_extraction() -> None:
+def test_hash_and_feature_extraction() -> None:
     event = EventEnvelope(
         event_type="llm.request",
         agent_id="agent",
@@ -38,10 +39,12 @@ def test_hash_extraction() -> None:
     )
 
     async def _run() -> EventEnvelope:
-        return (await HashFingerprintPreprocessor(fields_to_hash=["message"]).process(event))[0]
+        event1 = (await HashFingerprintPreprocessor(fields_to_hash=["message"]).process(event))[0]
+        return (await FeatureExtractionPreprocessor().process(event1))[0]
 
     out = asyncio.run(_run())
     assert out.meta["hashes"]["message"]
+    assert out.meta["features"]["approx_tokens"] > 0
 
 
 def test_url_domain_extraction() -> None:
