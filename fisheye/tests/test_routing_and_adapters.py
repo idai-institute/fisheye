@@ -7,6 +7,7 @@ from fisheye.adapters.langchain import LangChainAdapter
 from fisheye.adapters.openai_agents import OpenAIAgentsAdapter
 from fisheye.bus.async_bus import AsyncEventBus
 from fisheye.collectors.base import Collector
+from fisheye.preprocessors.features import FeatureExtractionPreprocessor, FeatureOnlyProjectionPreprocessor
 from fisheye.preprocessors.pipeline import PreprocessorPipeline
 from fisheye.runtime import FisheyeRuntime
 
@@ -28,21 +29,26 @@ class _DummyRuntime:
         self.events.append(event)
 
 
-def test_routing_modes() -> None:
+def test_routing_modes_feature_projection() -> None:
     raw_collector = _RecordingCollector()
-    redacted_collector = _RecordingCollector()
+    feature_collector = _RecordingCollector()
 
     runtime = FisheyeRuntime(
         bus=AsyncEventBus(),
         preprocessor_pipelines={
             "raw": PreprocessorPipeline([]),
-            "redacted": PreprocessorPipeline([]),
+            "feature_only": PreprocessorPipeline(
+                [
+                    FeatureExtractionPreprocessor(),
+                    FeatureOnlyProjectionPreprocessor(),
+                ]
+            ),
         },
     )
 
     async def _run() -> tuple[list, list]:
         runtime.register_collector(raw_collector, mode="raw")
-        runtime.register_collector(redacted_collector, mode="redacted")
+        runtime.register_collector(feature_collector, mode="feature_only")
         await runtime.start()
         await runtime.publish(
             {
@@ -54,13 +60,15 @@ def test_routing_modes() -> None:
         )
         await runtime.drain(timeout=2.0)
         await runtime.stop()
-        return raw_collector.events, redacted_collector.events
+        return raw_collector.events, feature_collector.events
 
-    raw_events, redacted_events = asyncio.run(_run())
+    raw_events, feature_events = asyncio.run(_run())
     assert raw_events
-    assert redacted_events
+    assert feature_events
     assert raw_events[0].payload["message"] == "keep this raw"
-    assert redacted_events[0].payload["message"] == "keep this raw"
+    assert raw_events[0].meta.get("feature_only") is None
+    assert "features" in feature_events[0].payload
+    assert feature_events[0].meta.get("feature_only") is True
 
 
 def test_langchain_callback_handler_dispatches_events() -> None:

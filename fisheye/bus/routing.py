@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal
 
-RouteMode = Literal["raw", "redacted"]
+RouteMode = Literal["raw", "redacted", "feature_only"]
 
 @dataclass(slots=True)
 class Route:

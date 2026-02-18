@@ -17,7 +17,7 @@ from fisheye.detectors.prompt_injection import PromptInjectionDetector
 from fisheye.preprocessors.base import Preprocessor
 from fisheye.preprocessors.buffering import BufferingPreprocessor
 from fisheye.preprocessors.embeddings import EmbeddingPreprocessor, LocalHashEmbeddingProvider, NoopEmbeddingProvider
-from fisheye.preprocessors.features import FeatureExtractionPreprocessor
+from fisheye.preprocessors.features import FeatureExtractionPreprocessor, FeatureOnlyProjectionPreprocessor
 from fisheye.preprocessors.hashing import HashFingerprintPreprocessor
 from fisheye.preprocessors.pipeline import PreprocessorPipeline
 from fisheye.preprocessors.redaction import PIIRedactionPreprocessor, SecretRedactionPreprocessor
@@ -163,6 +163,7 @@ def _build_preprocessor_pipeline(
     config: FisheyeConfig,
     *,
     include_redaction: bool,
+    feature_only: bool,
 ) -> PreprocessorPipeline:
     preprocessors: list[Preprocessor] = []
 
@@ -187,6 +188,9 @@ def _build_preprocessor_pipeline(
         preprocessors.append(URLDomainExtractionPreprocessor())
     if config.preprocessors.enable_embeddings:
         preprocessors.append(EmbeddingPreprocessor(provider=_build_embedding_provider(config)))
+
+    if feature_only:
+        preprocessors.append(FeatureOnlyProjectionPreprocessor())
 
     return PreprocessorPipeline(preprocessors)
 
@@ -229,8 +233,9 @@ def build_default_runtime(config: FisheyeConfig | None = None) -> FisheyeRuntime
             default_retries=config.bus.retry_attempts,
         ),
         preprocessor_pipelines={
-            "raw": _build_preprocessor_pipeline(config, include_redaction=False),
-            "redacted": _build_preprocessor_pipeline(config, include_redaction=True),
+            "raw": _build_preprocessor_pipeline(config, include_redaction=False, feature_only=False),
+            "redacted": _build_preprocessor_pipeline(config, include_redaction=True, feature_only=False),
+            "feature_only": _build_preprocessor_pipeline(config, include_redaction=True, feature_only=True),
         },
         store=store,
     )
