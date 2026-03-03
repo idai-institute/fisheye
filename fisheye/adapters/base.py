@@ -30,7 +30,10 @@ class AdapterBase:
         return event
 
     def dispatch(self, coroutine: Awaitable[Any]) -> None:
-        """Fire-and-forget helper for sync callback contexts."""
+        """Submit callbacks to the runtime's owned loop when available."""
+        if hasattr(self.runtime, "submit"):
+            self.runtime.submit(coroutine)
+            return
         try:
             loop = asyncio.get_running_loop()
         except RuntimeError:

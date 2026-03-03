@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
-from typing import Any
+from typing import Any, Coroutine
 
 from fisheye.behavior.monitor import StatisticalBehaviorMonitor
 from fisheye.bus.async_bus import AsyncEventBus
@@ -62,6 +63,47 @@ class FisheyeRuntime:
         self.collectors: list[Collector] = []
         self.router = Router()
         self._started = False
+        self._loop: asyncio.AbstractEventLoop | None = None
+        self._pending: set[asyncio.Task[Any]] = set()
+        self._sync_bridge: Any = None
+
+    def submit(self, coroutine: Coroutine[Any, Any, Any]) -> Any:
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
+        if self._loop and self._loop.is_running() and loop is not self._loop:
+            return asyncio.run_coroutine_threadsafe(coroutine, self._loop)
+        if loop is not None:
+            task = loop.create_task(coroutine)
+            self._pending.add(task)
+            return task
+        if self._sync_bridge is None:
+            from fisheye.sync.wrappers import SyncFisheyeRuntime
+            self._sync_bridge = SyncFisheyeRuntime(self)
+        return self._sync_bridge.submit(coroutine).result()
+
+    def close(self) -> None:
+        if self._sync_bridge is not None:
+            self._sync_bridge.close()
+        elif self._started:
+            raise RuntimeError("Use 'await aclose()' for an asynchronous runtime")
+        elif self.store:
+            self.store.close()
+
+    async def aclose(self) -> None:
+        try:
+            await self.stop()
+        finally:
+            if self.store:
+                self.store.close()
+
+    async def __aenter__(self) -> "FisheyeRuntime":
+        await self.start()
+        return self
+
+    async def __aexit__(self, *_: Any) -> None:
+        await self.aclose()
 
     def register_collector(
         self,
@@ -91,6 +133,7 @@ class FisheyeRuntime:
     async def start(self) -> None:
         if self._started:
             return
+        self._loop = asyncio.get_running_loop()
         await self.bus.start()
         self._started = True
 
@@ -108,9 +151,11 @@ class FisheyeRuntime:
                 event.meta[_ROUTE_MODE_META_KEY] = mode
                 await self.bus.publish(event)
 
-        await self.bus.drain(timeout=2.0)
-        await self.bus.stop()
-        self._started = False
+        try:
+            await self.drain(timeout=10.0)
+        finally:
+            await self.bus.stop()
+            self._started = False
 
     async def publish(self, event: EventEnvelope | dict[str, Any]) -> None:
         if not self._started:
@@ -134,6 +179,10 @@ class FisheyeRuntime:
             await self.publish(event)
 
     async def drain(self, timeout: float | None = None) -> None:
+        pending = self._pending - {asyncio.current_task()}
+        if pending:
+            await asyncio.wait_for(asyncio.gather(*pending), timeout)
+            self._pending.difference_update(pending)
         await self.bus.drain(timeout=timeout)
 
     @property
