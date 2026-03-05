@@ -39,7 +39,9 @@ class PromptInjectionDetector(Detector):
     async def analyze(self, event: EventEnvelope, context: dict[str, Any]) -> DetectorSignal | None:
         run_state = context.setdefault(event.run_id, {})
 
-        if event.event_type in {"llm.request", "llm.message"}:
+        if event.event_type in {"llm.request", "llm.message", "tool.call.end"}:
+            if event.payload.get("quoted") or event.payload.get("trust") == "trusted":
+                return None
             text = extract_text(event.payload)
             matches: list[str] = []
             for rule_id, pattern in self.patterns:
@@ -50,6 +52,7 @@ class PromptInjectionDetector(Detector):
                 return None
 
             run_state["last_injection_ts"] = event.timestamp
+            run_state["injection_event_id"] = event.event_id
             score = clamp(0.25 + 0.2 * len(matches))
             return DetectorSignal(
                 detector_id=self.detector_id,
@@ -67,7 +70,7 @@ class PromptInjectionDetector(Detector):
             last_injection = run_state.get("last_injection_ts")
             if not last_injection:
                 return None
-            if (event.timestamp - last_injection) > self.lookback:
+            if not timedelta(0) <= (event.timestamp - last_injection) <= self.lookback:
                 return None
 
             tool_name = str(event.payload.get("tool_name") or event.payload.get("name") or "").lower()
@@ -81,6 +84,6 @@ class PromptInjectionDetector(Detector):
                         "tool_name": tool_name,
                         "lookback_seconds": int(self.lookback.total_seconds()),
                     },
-                    related_event_ids=[event.event_id],
+                    related_event_ids=[run_state["injection_event_id"], event.event_id],
                 )
         return None

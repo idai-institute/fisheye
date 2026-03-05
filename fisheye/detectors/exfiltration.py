@@ -59,12 +59,13 @@ class DataExfiltrationDetector(Detector):
                 "hits": sensitive_hits,
                 "event_id": event.event_id,
             }
+            outbound = self._is_outbound_event(event)
             return DetectorSignal(
                 detector_id=self.detector_id,
                 category="data_exfiltration",
-                score=clamp(0.35 + 0.08 * len(sensitive_hits)),
+                score=0.95 if outbound else clamp(0.35 + 0.08 * len(sensitive_hits)),
                 evidence={
-                    "reason": "sensitive_content_observed",
+                    "reason": "sensitive_content_outbound" if outbound else "sensitive_content_observed",
                     "sensitive_hits": sensitive_hits,
                 },
                 related_event_ids=[event.event_id],
@@ -94,7 +95,7 @@ class DataExfiltrationDetector(Detector):
                 )
             return None
 
-        recent = (event.timestamp - last_sensitive["timestamp"]) <= self.sensitive_window
+        recent = timedelta(0) <= (event.timestamp - last_sensitive["timestamp"]) <= self.sensitive_window
         if not recent:
             return None
 
