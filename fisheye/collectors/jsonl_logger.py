@@ -7,6 +7,7 @@ from pathlib import Path
 from fisheye.collectors.base import AlertSink, Collector
 from fisheye.schema.alerts import Alert
 from fisheye.schema.events import EventEnvelope
+from fisheye.privacy import redact
 
 
 class JsonlLoggerCollector(Collector, AlertSink):
@@ -27,7 +28,7 @@ class JsonlLoggerCollector(Collector, AlertSink):
             self.alerts_path.parent.mkdir(parents=True, exist_ok=True)
 
     async def _write_line(self, path: Path, payload: dict) -> None:
-        line = json.dumps(payload, default=str, separators=(",", ":")) + "\n"
+        line = json.dumps(redact(payload), default=str, separators=(",", ":")) + "\n"
         async with self._lock:
             await asyncio.to_thread(self._rotate_if_needed, path)
             await asyncio.to_thread(self._append_line, path, line)

@@ -38,8 +38,8 @@ class PreprocessorConfig:
     enable_buffering: bool = False
     buffering_max_events: int = 20
     buffering_max_seconds: float = 2.0
-    enable_secret_redaction: bool = False
-    enable_pii_redaction: bool = False
+    enable_secret_redaction: bool = True
+    enable_pii_redaction: bool = True
     enable_hashing: bool = True
     enable_features: bool = True
     enable_url_extraction: bool = True

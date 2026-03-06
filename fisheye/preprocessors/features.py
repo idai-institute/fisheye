@@ -37,5 +37,6 @@ class FeatureOnlyProjectionPreprocessor(Preprocessor):
             "domains": event.meta.get("domains", []),
             "original_payload_bytes": original_size,
         }
-        event.meta["feature_only"] = True
+        event.meta = {"feature_only": True}
+        event.tags = {}
         return [event]
