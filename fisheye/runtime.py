@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any, Coroutine
 
 from fisheye.behavior.monitor import StatisticalBehaviorMonitor
-from fisheye.bus.async_bus import AsyncEventBus
+from fisheye.bus.async_bus import AsyncEventBus, DeliveryReceipt
 from fisheye.bus.routing import Route, RouteMode, Router
 from fisheye.collectors.base import Collector
 from fisheye.collectors.jsonl_logger import JsonlLoggerCollector
@@ -66,6 +66,7 @@ class FisheyeRuntime:
         self._loop: asyncio.AbstractEventLoop | None = None
         self._pending: set[asyncio.Task[Any]] = set()
         self._sync_bridge: Any = None
+        self._flush_task: asyncio.Task[None] | None = None
 
     def submit(self, coroutine: Coroutine[Any, Any, Any]) -> Any:
         try:
@@ -136,10 +137,34 @@ class FisheyeRuntime:
         self._loop = asyncio.get_running_loop()
         await self.bus.start()
         self._started = True
+        self._flush_task = asyncio.create_task(self._flush_periodically())
+
+    async def _flush_periodically(self) -> None:
+        while True:
+            await asyncio.sleep(0.1)
+            for mode, pipeline in self.preprocessor_pipelines.items():
+                for processor in pipeline.preprocessors:
+                    if isinstance(processor, BufferingPreprocessor) and processor._should_flush():
+                        await self._flush_mode(mode)
+                        break
+
+    async def _publish_mode(self, event: EventEnvelope, mode: RouteMode) -> DeliveryReceipt:
+        event.meta[_ROUTE_MODE_META_KEY] = mode
+        ids = [i for i, route in self.router.list_routes().items() if route.mode == mode]
+        return await self.bus.publish(event, subscription_ids=ids)
+
+    async def _flush_mode(self, mode: RouteMode) -> None:
+        for event in await self.preprocessor_pipelines[mode].flush():
+            await self._publish_mode(event, mode)
 
     async def stop(self) -> None:
         if not self._started:
             return
+
+        if self._flush_task:
+            self._flush_task.cancel()
+            await asyncio.gather(self._flush_task, return_exceptions=True)
+            self._flush_task = None
 
         for mode in sorted(self._active_modes()):
             pipeline = self.preprocessor_pipelines.get(mode)
@@ -148,8 +173,7 @@ class FisheyeRuntime:
 
             flushed = await pipeline.flush()
             for event in flushed:
-                event.meta[_ROUTE_MODE_META_KEY] = mode
-                await self.bus.publish(event)
+                await self._publish_mode(event, mode)
 
         try:
             await self.drain(timeout=10.0)
@@ -157,12 +181,13 @@ class FisheyeRuntime:
             await self.bus.stop()
             self._started = False
 
-    async def publish(self, event: EventEnvelope | dict[str, Any]) -> None:
+    async def publish(self, event: EventEnvelope | dict[str, Any]) -> DeliveryReceipt:
         if not self._started:
             await self.start()
 
         normalized = event if isinstance(event, EventEnvelope) else EventEnvelope.model_validate(event)
 
+        delivered = dropped = 0
         for mode in sorted(self._active_modes()):
             pipeline = self.preprocessor_pipelines.get(mode)
             if pipeline is None:
@@ -171,8 +196,10 @@ class FisheyeRuntime:
             seed = normalized.model_copy(deep=True)
             processed = await pipeline.process(seed)
             for candidate in processed:
-                candidate.meta[_ROUTE_MODE_META_KEY] = mode
-                await self.bus.publish(candidate)
+                receipt = await self._publish_mode(candidate, mode)
+                delivered += receipt.delivered
+                dropped += receipt.dropped
+        return DeliveryReceipt(normalized.event_id, delivered, dropped)
 
     async def ingest(self, events: list[EventEnvelope | dict[str, Any]]) -> None:
         for event in events:
