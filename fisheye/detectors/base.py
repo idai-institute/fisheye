@@ -11,7 +11,9 @@ from fisheye.schema.events import EventEnvelope
 class DetectorSignal(BaseModel):
     detector_id: str
     category: str
-    score: float
+    score: float = Field(allow_inf_nan=False)
+    detector_version: str = "1"
+    coverage: str = "evaluated"
     evidence: dict[str, Any] = Field(default_factory=dict)
     related_event_ids: list[str] = Field(default_factory=list)
 

@@ -6,7 +6,7 @@ from uuid import uuid4
 
 from pydantic import BaseModel, Field, field_validator
 
-AlertCategory = Literal["prompt_injection", "data_exfiltration", "dos", "behavioral"]
+AlertCategory = str
 
 
 class Alert(BaseModel):
@@ -15,8 +15,8 @@ class Alert(BaseModel):
     agent_id: str
     run_id: str
     category: AlertCategory
-    score: float
-    threshold: float
+    score: float = Field(allow_inf_nan=False)
+    threshold: float = Field(allow_inf_nan=False)
     triggered: bool
     sources: list[str] = Field(default_factory=list)
     evidence: dict[str, Any] = Field(default_factory=dict)
