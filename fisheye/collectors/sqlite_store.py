@@ -32,13 +32,17 @@ class SQLiteStore(Collector, AlertSink):
     def __init__(self, db_path: str | Path) -> None:
         self.db_path = Path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
         self._conn = sqlite3.connect(self.db_path, check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
         self._init_schema()
 
     def close(self) -> None:
-        self._conn.close()
+        with self._lock:
+            self._conn.close()
+
+    def _commit(self) -> None:
+        self._conn.commit()
 
     def _init_schema(self) -> None:
         with self._lock:
@@ -110,7 +114,7 @@ class SQLiteStore(Collector, AlertSink):
                 CREATE INDEX IF NOT EXISTS idx_alerts_category_score_ts ON alerts(category, score, timestamp);
                 """
             )
-            self._conn.commit()
+            self._commit()
 
     @staticmethod
     def _json(data: Any) -> str:
@@ -136,9 +140,11 @@ class SQLiteStore(Collector, AlertSink):
 
     def _insert_event(self, event: EventEnvelope) -> None:
         with self._lock:
+            if self._conn.execute("SELECT 1 FROM events WHERE event_id=?", (event.event_id,)).fetchone():
+                return
             self._conn.execute(
                 """
-                INSERT OR REPLACE INTO events (
+                INSERT INTO events (
                     event_id,timestamp,event_type,agent_id,run_id,trace_id,span_id,parent_span_id,
                     session_id,framework,tags_json,meta_json,payload_json
                 ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
@@ -164,7 +170,8 @@ class SQLiteStore(Collector, AlertSink):
                 INSERT INTO runs (run_id, agent_id, first_seen, last_seen, event_count)
                 VALUES (?, ?, ?, ?, 1)
                 ON CONFLICT(run_id) DO UPDATE SET
-                    last_seen=excluded.last_seen,
+                    first_seen=MIN(first_seen,excluded.first_seen),
+                    last_seen=MAX(last_seen,excluded.last_seen),
                     event_count=event_count+1
                 """,
                 (
@@ -174,7 +181,7 @@ class SQLiteStore(Collector, AlertSink):
                     event.timestamp.isoformat(),
                 ),
             )
-            self._conn.commit()
+            self._commit()
 
     def _insert_alert(self, alert: Alert) -> None:
         with self._lock:
@@ -199,7 +206,7 @@ class SQLiteStore(Collector, AlertSink):
                     self._json(alert.related_event_ids),
                 ),
             )
-            self._conn.commit()
+            self._commit()
 
     def _insert_detector_signal(self, signal: DetectorSignal, event: EventEnvelope) -> None:
         with self._lock:
@@ -220,7 +227,7 @@ class SQLiteStore(Collector, AlertSink):
                     self._json(signal.evidence),
                 ),
             )
-            self._conn.commit()
+            self._commit()
 
     def _insert_behavior_stat(self, stat: BehaviorStat) -> None:
         with self._lock:
@@ -240,7 +247,7 @@ class SQLiteStore(Collector, AlertSink):
                     stat.tool_name,
                 ),
             )
-            self._conn.commit()
+            self._commit()
 
     def _query(self, sql: str, args: tuple[Any, ...] = ()) -> list[sqlite3.Row]:
         with self._lock:
