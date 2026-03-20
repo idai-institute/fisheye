@@ -111,7 +111,7 @@ class JournalStore(SQLiteStore):
                     if old:
                         previous = json.loads(old['data_json'])
                         finding.status = old['status']
-                        finding.first_seen = previous['first_seen']
+                        finding.first_seen = datetime.fromisoformat(previous['first_seen'].replace('Z','+00:00'))
                         finding.event_ids = sorted(set(finding.event_ids + previous['event_ids']))[-200:]
                         finding.occurrences = previous.get('occurrences',1) + 1
                     self._conn.execute('INSERT OR REPLACE INTO findings VALUES(?,?,?,?,?,?)',

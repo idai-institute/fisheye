@@ -51,7 +51,7 @@ class DataExfiltrationDetector(Detector):
     async def analyze(self, event: EventEnvelope, context: dict[str, Any]) -> DetectorSignal | None:
         run_state = context.setdefault(event.run_id, {})
         text = extract_text(event.payload)
-        sensitive_hits = self._scan_sensitive(text)
+        sensitive_hits = sorted(set(self._scan_sensitive(text) + event.meta.get("_analysis", {}).get("sensitive_types", [])))
 
         if sensitive_hits:
             run_state["last_sensitive"] = {

@@ -43,10 +43,11 @@ class PromptInjectionDetector(Detector):
             if event.payload.get("quoted") or event.payload.get("trust") == "trusted":
                 return None
             text = extract_text(event.payload)
-            matches: list[str] = []
+            matches: list[str] = list(event.meta.get("_analysis", {}).get("injection_rules", []))
             for rule_id, pattern in self.patterns:
                 if pattern.search(text):
-                    matches.append(rule_id)
+                    if rule_id not in matches:
+                        matches.append(rule_id)
 
             if not matches:
                 return None

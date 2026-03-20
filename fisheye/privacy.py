@@ -22,3 +22,26 @@ def redact(value: Any) -> Any:
     if isinstance(value, (tuple, list)):
         return [redact(v) for v in value]
     return value
+
+
+def capture_event(event, raw=False):
+    """Extract local evidence before discarding sensitive content."""
+    from fisheye.detectors.exfiltration import DataExfiltrationDetector
+    from fisheye.detectors.prompt_injection import PromptInjectionDetector
+    from fisheye.detectors.utils import extract_text
+    from fisheye.schema.events import EventEnvelope
+    text = extract_text(event.payload)
+    analysis = {
+        'sensitive_types': DataExfiltrationDetector()._scan_sensitive(text),
+        'injection_rules': [name for name, pattern in PromptInjectionDetector().patterns if pattern.search(text)],
+        'approx_tokens': max(len(text.split()), len(text) // 4),
+        'content_bytes': len(text.encode()),
+    }
+    data = event.model_dump(mode='json')
+    if not raw:
+        data['payload'] = redact(data['payload'])
+        data['meta'] = redact(data['meta'])
+        data['tags'] = redact(data['tags'])
+    data['meta'].pop('_route_mode', None)
+    data['meta']['_analysis'] = analysis
+    return EventEnvelope.model_validate(data)

@@ -24,6 +24,9 @@ from fisheye.preprocessors.pipeline import PreprocessorPipeline
 from fisheye.preprocessors.redaction import PIIRedactionPreprocessor, SecretRedactionPreprocessor
 from fisheye.preprocessors.urls import URLDomainExtractionPreprocessor
 from fisheye.schema.events import EventEnvelope
+from fisheye.collectors.journal import JournalStore
+from fisheye.analysis import AnalysisProcessor
+from fisheye.privacy import capture_event
 
 _ROUTE_MODE_META_KEY = "_route_mode"
 
@@ -67,6 +70,11 @@ class FisheyeRuntime:
         self._pending: set[asyncio.Task[Any]] = set()
         self._sync_bridge: Any = None
         self._flush_task: asyncio.Task[None] | None = None
+        self.analysis: AnalysisProcessor | None = None
+        self._journal_task: asyncio.Task[None] | None = None
+        self._wake = asyncio.Event()
+        self._analysis_error: str | None = None
+        self._journal_metrics: dict[str, Any] = {}
 
     def submit(self, coroutine: Coroutine[Any, Any, Any]) -> Any:
         try:
@@ -138,6 +146,35 @@ class FisheyeRuntime:
         await self.bus.start()
         self._started = True
         self._flush_task = asyncio.create_task(self._flush_periodically())
+        if self.analysis is not None and isinstance(self.store, JournalStore):
+            self._journal_task = asyncio.create_task(self._process_journal())
+            self._wake.set()
+
+    async def _process_journal(self) -> None:
+        assert isinstance(self.store, JournalStore) and self.analysis is not None
+        while True:
+            self._wake.clear()
+            try:
+                pending = await self.store.pending()
+                for sequence, event in pending:
+                    result = await self.analysis.analyze(event, await self.store.checkpoint(event.scope))
+                    await self.store.commit_analysis(sequence, event, result.state, result.alerts,
+                                                     result.findings, result.signals, result.errors)
+                    for mode in sorted(self._active_modes()):
+                        for projected in await self.preprocessor_pipelines[mode].process(event.model_copy(deep=True)):
+                            await self._publish_mode(projected, mode)
+                    if hasattr(self, 'logger'):
+                        for alert in result.alerts:
+                            await self.logger.handle_alert(alert)
+                self._analysis_error = None
+                self._journal_metrics = await self.store.journal_metrics()
+                if pending:
+                    continue
+            except Exception as exc:
+                self._analysis_error = type(exc).__name__
+                await asyncio.sleep(0.1)
+                continue
+            await self._wake.wait()
 
     async def _flush_periodically(self) -> None:
         while True:
@@ -178,6 +215,10 @@ class FisheyeRuntime:
         try:
             await self.drain(timeout=10.0)
         finally:
+            if self._journal_task:
+                self._journal_task.cancel()
+                await asyncio.gather(self._journal_task, return_exceptions=True)
+                self._journal_task = None
             await self.bus.stop()
             self._started = False
 
@@ -186,6 +227,12 @@ class FisheyeRuntime:
             await self.start()
 
         normalized = event if isinstance(event, EventEnvelope) else EventEnvelope.model_validate(event)
+
+        if self.analysis is not None and isinstance(self.store, JournalStore):
+            normalized = capture_event(normalized)
+            receipt = await self.store.accept(normalized)
+            self._wake.set()
+            return receipt
 
         delivered = dropped = 0
         for mode in sorted(self._active_modes()):
@@ -210,11 +257,22 @@ class FisheyeRuntime:
         if pending:
             await asyncio.wait_for(asyncio.gather(*pending), timeout)
             self._pending.difference_update(pending)
+        if self.analysis is not None and isinstance(self.store, JournalStore):
+            async def finish_journal() -> None:
+                while (await self.store.journal_metrics())['pending']:
+                    if self._analysis_error:
+                        raise RuntimeError(f"Analysis unavailable: {self._analysis_error}")
+                    self._wake.set()
+                    await asyncio.sleep(0.005)
+            await asyncio.wait_for(finish_journal(), timeout)
+        for mode in sorted(self._active_modes()):
+            await self._flush_mode(mode)
         await self.bus.drain(timeout=timeout)
 
     @property
     def metrics(self) -> dict[str, Any]:
-        return self.bus.metrics
+        return dict(self.bus.metrics, journal=self._journal_metrics, analysis_error=self._analysis_error,
+                    coverage=self.analysis.coverage if self.analysis else {})
 
     def list_routes(self) -> dict[int, Route]:
         return self.router.list_routes()
@@ -273,56 +331,25 @@ def _build_preprocessor_pipeline(
 
 def build_default_runtime(config: FisheyeConfig | None = None) -> FisheyeRuntime:
     config = config or FisheyeConfig()
-
-    store = SQLiteStore(Path(config.storage.sqlite_path))
-    logger = JsonlLoggerCollector(
-        events_path=config.storage.events_jsonl_path,
-        alerts_path=config.storage.alerts_jsonl_path,
-    )
-
-    detector_engine = DetectorEngine(
-        detectors=[
-            PromptInjectionDetector(),
-            DataExfiltrationDetector(),
-            DoSDetector(),
-        ],
-        store=store,
-        alert_sinks=[logger],
-        thresholds={
-            "prompt_injection": config.thresholds.prompt_injection,
-            "data_exfiltration": config.thresholds.data_exfiltration,
-            "dos": config.thresholds.dos,
-            "behavioral": config.thresholds.behavioral,
-        },
-        detector_weights=config.detector_weights,
-    )
-
-    behavior_monitor = StatisticalBehaviorMonitor(
-        store=store,
-        alert_sinks=[logger],
-        threshold=config.thresholds.behavioral,
-    )
-
+    store = JournalStore(Path(config.storage.sqlite_path))
+    logger = JsonlLoggerCollector(config.storage.events_jsonl_path, config.storage.alerts_jsonl_path)
+    analysis = AnalysisProcessor(thresholds={
+        "prompt_injection": config.thresholds.prompt_injection,
+        "data_exfiltration": config.thresholds.data_exfiltration,
+        "dos": config.thresholds.dos,
+        "behavioral": config.thresholds.behavioral,
+    }, detector_weights=config.detector_weights)
     runtime = FisheyeRuntime(
-        bus=AsyncEventBus(
-            queue_size=config.bus.queue_size,
-            default_retries=config.bus.retry_attempts,
-        ),
+        bus=AsyncEventBus(queue_size=config.bus.queue_size, default_retries=config.bus.retry_attempts, overflow="drop"),
         preprocessor_pipelines={
             "raw": _build_preprocessor_pipeline(config, include_redaction=False, feature_only=False),
             "redacted": _build_preprocessor_pipeline(config, include_redaction=True, feature_only=False),
             "feature_only": _build_preprocessor_pipeline(config, include_redaction=True, feature_only=True),
-        },
-        store=store,
+        }, store=store,
     )
-
-    runtime.register_collector(store, mode="raw")
-    runtime.register_collector(detector_engine, mode="raw")
-    runtime.register_collector(behavior_monitor, mode="raw")
+    runtime.analysis = analysis
+    runtime.detector_engine = analysis
+    runtime.logger = logger
+    runtime.config = config
     runtime.register_collector(logger, mode="redacted")
-
-    runtime.detector_engine = detector_engine  # type: ignore[attr-defined]
-    runtime.behavior_monitor = behavior_monitor  # type: ignore[attr-defined]
-    runtime.logger = logger  # type: ignore[attr-defined]
-    runtime.config = config  # type: ignore[attr-defined]
     return runtime
