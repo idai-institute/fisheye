@@ -47,6 +47,14 @@ class _RoutedCollector(Collector):
 
 
 class FisheyeRuntime:
+    def workflow(self, workflow_id: str | None = None, **kwargs: Any):
+        from fisheye.context import Workflow
+        return Workflow(self, workflow_id, **kwargs)
+
+    def sync(self):
+        from fisheye.sync.wrappers import SyncFisheyeRuntime
+        return SyncFisheyeRuntime(self)
+
     def __init__(
         self,
         bus: AsyncEventBus,
@@ -331,14 +339,17 @@ def _build_preprocessor_pipeline(
 
 def build_default_runtime(config: FisheyeConfig | None = None) -> FisheyeRuntime:
     config = config or FisheyeConfig()
-    store = JournalStore(Path(config.storage.sqlite_path))
+    store = JournalStore(Path(config.storage.sqlite_path), max_pending=config.storage.max_pending)
     logger = JsonlLoggerCollector(config.storage.events_jsonl_path, config.storage.alerts_jsonl_path)
     analysis = AnalysisProcessor(thresholds={
         "prompt_injection": config.thresholds.prompt_injection,
         "data_exfiltration": config.thresholds.data_exfiltration,
         "dos": config.thresholds.dos,
         "behavioral": config.thresholds.behavioral,
-    }, detector_weights=config.detector_weights)
+    }, detector_weights=config.detector_weights, config_version=config.fingerprint)
+    from fisheye.graph import WorkflowGraph
+    analysis.graph = WorkflowGraph(config.oversight.graph_max_events, config.oversight.token_budget,
+                                   config.oversight.cost_budget, config.oversight.call_budget)
     runtime = FisheyeRuntime(
         bus=AsyncEventBus(queue_size=config.bus.queue_size, default_retries=config.bus.retry_attempts, overflow="drop"),
         preprocessor_pipelines={
