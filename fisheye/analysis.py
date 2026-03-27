@@ -35,13 +35,14 @@ class _AlertBuffer:
 
 
 class AnalysisProcessor:
-    def __init__(self, thresholds=None, detector_weights=None, detectors=None, graph=None, config_version=''):
+    def __init__(self, thresholds=None, detector_weights=None, detectors=None, graph=None, config_version='', min_samples=10, frozen=False):
         self.detectors=detectors if detectors is not None else [PromptInjectionDetector(),DataExfiltrationDetector(),DoSDetector()]
         self.thresholds=thresholds or dict(prompt_injection=.7,data_exfiltration=.7,dos=.7,behavioral=.75)
         self.weights=detector_weights or {}
         self.graph=graph or WorkflowGraph()
         self.config_version=config_version
         self.coverage={}
+        self.min_samples, self.frozen = min_samples, frozen
 
     def list_detector_ids(self):
         return [d.detector_id for d in self.detectors]
@@ -81,7 +82,8 @@ class AnalysisProcessor:
                 evidence={'signals':[s.model_dump(mode='json') for s in items]},
                 related_event_ids=sorted({event.event_id,*[i for s in items for i in s.related_event_ids]})))
         sink=_AlertBuffer()
-        monitor=StatisticalBehaviorMonitor(alert_sinks=[sink],threshold=self.thresholds.get('behavioral',.75))
+        monitor=StatisticalBehaviorMonitor(alert_sinks=[sink],threshold=self.thresholds.get('behavioral',.75),
+                                           min_samples=self.min_samples, frozen=self.frozen)
         for key, value in state.get('behavior',{}).items():
             getattr(monitor,key).update(value)
         await monitor.handle_event(event)

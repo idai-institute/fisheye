@@ -23,24 +23,34 @@ class StatisticalBehaviorMonitor(Collector):
         threshold: float = 0.75,
         z_threshold: float = 3.0,
         rate_window_seconds: int = 30,
+        min_samples: int = 1,
+        frozen: bool = False,
     ) -> None:
         self.store = store
         self.alert_sinks = alert_sinks or []
         self.threshold = threshold
         self.z_threshold = z_threshold
         self.rate_window = timedelta(seconds=rate_window_seconds)
+        self.min_samples = min_samples
+        self.frozen = frozen
 
-        self._tool_call_times: dict[tuple[str, str], deque[datetime]] = defaultdict(deque)
-        self._event_outcomes: dict[str, deque[tuple[datetime, int]]] = defaultdict(deque)
+        self._tool_call_times: dict[tuple[str, str], deque[datetime]] = defaultdict(lambda: deque(maxlen=10000))
+        self._event_outcomes: dict[str, deque[tuple[datetime, int]]] = defaultdict(lambda: deque(maxlen=10000))
         self._tool_recent: dict[str, deque[str]] = defaultdict(lambda: deque(maxlen=100))
 
-        self._tool_rate_stats: dict[tuple[str, str], EwmaTracker] = defaultdict(EwmaTracker)
-        self._latency_stats: dict[tuple[str, str], EwmaTracker] = defaultdict(EwmaTracker)
-        self._token_stats: dict[str, EwmaTracker] = defaultdict(EwmaTracker)
-        self._error_rate_stats: dict[str, EwmaTracker] = defaultdict(EwmaTracker)
+        factory = lambda: EwmaTracker(min_samples=min_samples, frozen=frozen)
+        self._tool_rate_stats: dict[tuple[str, str], EwmaTracker] = defaultdict(factory)
+        self._latency_stats: dict[tuple[str, str], EwmaTracker] = defaultdict(factory)
+        self._token_stats: dict[str, EwmaTracker] = defaultdict(factory)
+        self._error_rate_stats: dict[str, EwmaTracker] = defaultdict(factory)
         self._tool_dist_stats: dict[str, ToolDistributionTracker] = defaultdict(ToolDistributionTracker)
 
     async def handle_event(self, event: EventEnvelope) -> None:
+        # Keep high-cardinality tool/agent dimensions bounded inside a workflow.
+        for value in vars(self).values():
+            if isinstance(value, defaultdict) and len(value) > 1000:
+                for key in list(value)[:len(value) - 1000]:
+                    del value[key]
         alerts: list[Alert] = []
 
         rate_alert = await self._observe_tool_rate(event)
@@ -149,6 +159,8 @@ class StatisticalBehaviorMonitor(Collector):
         )
 
     async def _observe_error_rate(self, event: EventEnvelope) -> Alert | None:
+        if event.event_type not in {"tool.call.end", "tool.call.error"}:
+            return None
         history = self._event_outcomes[event.agent_id]
         is_error = 1 if event.event_type in {"agent.error", "tool.call.error"} else 0
         history.append((event.timestamp, is_error))
@@ -184,7 +196,12 @@ class StatisticalBehaviorMonitor(Collector):
         total = max(sum(counts.values()), 1)
         distribution = {name: count / total for name, count in counts.items()}
 
-        drift = self._tool_dist_stats[event.agent_id].update(distribution)
+        tracker = self._tool_dist_stats[event.agent_id]
+        if self.frozen and tracker.baseline:
+            keys = set(distribution) | set(tracker.baseline)
+            drift = min(1.0, sum(abs(distribution.get(k, 0) - tracker.baseline.get(k, 0)) for k in keys) / 2)
+        else:
+            drift = tracker.update(distribution)
         await self._store_behavior_stat(event, "tool_distribution_drift", drift, drift, tool_name)
 
         if drift < self.threshold:

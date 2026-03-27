@@ -346,7 +346,8 @@ def build_default_runtime(config: FisheyeConfig | None = None) -> FisheyeRuntime
         "data_exfiltration": config.thresholds.data_exfiltration,
         "dos": config.thresholds.dos,
         "behavioral": config.thresholds.behavioral,
-    }, detector_weights=config.detector_weights, config_version=config.fingerprint)
+    }, detector_weights=config.detector_weights, config_version=config.fingerprint,
+        min_samples=config.oversight.baseline_min_samples, frozen=config.oversight.baseline_frozen)
     from fisheye.graph import WorkflowGraph
     analysis.graph = WorkflowGraph(config.oversight.graph_max_events, config.oversight.token_budget,
                                    config.oversight.cost_budget, config.oversight.call_budget)
