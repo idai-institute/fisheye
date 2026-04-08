@@ -55,6 +55,13 @@ class FisheyeRuntime:
         from fisheye.sync.wrappers import SyncFisheyeRuntime
         return SyncFisheyeRuntime(self)
 
+    def supervise(self, policy, tools=None):
+        from fisheye.policies import Supervisor
+        if not isinstance(self.store, JournalStore):
+            raise ValueError("Supervision requires a durable store")
+        self.supervisor = Supervisor(self.store, policy, tools, runtime=self)
+        return self.supervisor
+
     def __init__(
         self,
         bus: AsyncEventBus,

@@ -171,3 +171,24 @@ class JournalStore(SQLiteStore):
                 return dict(accepted=row['total'], pending=row['pending'] or 0, oldest_pending=row['oldest'],
                             dead_letters=self._conn.execute('SELECT COUNT(*) FROM dead_letters').fetchone()[0])
         return await asyncio.to_thread(read)
+
+    async def list_workflows(self, application_id=None, limit=100, offset=0):
+        where=' WHERE json_extract(event_json,\'$.application_id\')=?' if application_id else ''
+        args=([application_id] if application_id else [])+[limit,offset]
+        rows=await asyncio.to_thread(self._query,
+            'SELECT scope, MIN(accepted_at) first_seen, MAX(accepted_at) last_seen, COUNT(*) event_count, '
+            "GROUP_CONCAT(DISTINCT json_extract(event_json,'$.agent_id')) agents FROM journal"+where+
+            ' GROUP BY scope ORDER BY last_seen DESC LIMIT ? OFFSET ?',tuple(args))
+        return [dict(application_id=json.loads(r['scope'])[0],environment=json.loads(r['scope'])[1],
+                     workflow_id=json.loads(r['scope'])[2],agent_ids=r['agents'].split(','),
+                     first_seen=r['first_seen'],last_seen=r['last_seen'],event_count=r['event_count']) for r in rows]
+
+    async def workflow_graph(self, scope):
+        checkpoint=await self.checkpoint(scope)
+        if checkpoint is None:
+            return dict(nodes=[],edges=[],tasks={},usage={},truncated=False)
+        from fisheye.state.codec import decode
+        graph=decode(checkpoint['data']).get('graph',{})
+        nodes=graph.get('nodes',{})
+        return dict(nodes=list(nodes.values()),edges=[{'source':p,'target':key} for key,node in nodes.items() for p in node['parents']],
+                    tasks=graph.get('tasks',{}),usage=graph.get('usage',{}),truncated=graph.get('truncated',False))

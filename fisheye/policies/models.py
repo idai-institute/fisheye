@@ -12,6 +12,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 class Action(BaseModel):
     model_config=ConfigDict(extra='forbid', frozen=True)
     action_id: str = Field(default_factory=lambda:uuid4().hex)
+    created_at: datetime = Field(default_factory=lambda:datetime.now(timezone.utc))
     application_id: str = 'default'
     environment: str = 'local'
     workflow_id: str

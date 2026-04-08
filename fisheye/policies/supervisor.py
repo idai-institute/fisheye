@@ -55,6 +55,7 @@ class Supervisor:
         findings=[]
         if self.runtime:
             await self.runtime.publish(dict(schema_version='2', event_id='proposal-'+action.action_id,
+                timestamp=action.created_at,
                 application_id=action.application_id,environment=action.environment,workflow_id=action.workflow_id,
                 agent_id=action.agent_id,run_id=action.workflow_id,event_type='action.proposed',links=action.source_event_ids,
                 payload=dict(tool_name=action.tool_name,destination=action.destination,classification=action.classification,
@@ -93,6 +94,9 @@ class Supervisor:
         return await asyncio.to_thread(persist)
 
     async def review(self,action: Action,approve: bool,reviewer: str):
+        return await self.review_id(action.action_id, action.digest, approve, reviewer)
+
+    async def review_id(self, action_id: str, action_digest: str, approve: bool, reviewer: str):
         if reviewer not in self.policy.reviewers:
             raise ActionDenied('Reviewer is not authorized')
         def update():
@@ -101,9 +105,10 @@ class Supervisor:
                 conn.execute('BEGIN IMMEDIATE')
                 try:
                     self._expire()
-                    row=conn.execute('SELECT * FROM actions WHERE action_id=?',(action.action_id,)).fetchone()
-                    if not row or row['status']!='pending' or row['digest']!=action.digest or row['policy_version']!=self.policy.version:
+                    row=conn.execute('SELECT * FROM actions WHERE action_id=?',(action_id,)).fetchone()
+                    if not row or row['status']!='pending' or row['digest']!=action_digest or row['policy_version']!=self.policy.version:
                         raise ActionDenied('Review is stale, expired, or action has changed')
+                    action=Action.model_validate_json(row['action_json'])
                     allowed=approve and self.policy.evaluate(action)[0]!='deny' and self._budget_available(action)
                     conn.execute('UPDATE actions SET decision=?,status=?,reason=?,reviewer=? WHERE action_id=?',
                         ('allow' if allowed else 'deny','approved' if allowed else 'denied',

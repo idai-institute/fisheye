@@ -2,10 +2,14 @@ from __future__ import annotations
 
 from typing import Any, Annotated
 import hmac
+import base64
+from dataclasses import asdict
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query
 from fastapi.responses import HTMLResponse
 from pydantic import ValidationError
+from fisheye.bus.async_bus import OverloadedError
+from fisheye.collectors.journal import EventConflictError
 
 from fisheye.api.dashboard import render_dashboard
 from fisheye.collectors.http_ingest import HttpIngestService
@@ -15,11 +19,17 @@ from fisheye.schema.events import EventEnvelope
 def register_routes(app: FastAPI, runtime: Any, api_key: str | None = None) -> None:
     ingest_service = HttpIngestService(runtime)
 
-    async def _auth(x_api_key: Annotated[str | None, Header(alias="X-API-Key")] = None) -> None:
+    async def _auth(x_api_key: Annotated[str | None, Header(alias="X-API-Key")] = None,
+                    authorization: Annotated[str | None, Header()] = None) -> None:
         if api_key is None:
             return
+        if x_api_key is None and authorization and authorization.startswith('Basic '):
+            try:
+                x_api_key = base64.b64decode(authorization[6:], validate=True).decode().split(':', 1)[1]
+            except (ValueError, IndexError, UnicodeError):
+                pass
         if x_api_key is None or not hmac.compare_digest(x_api_key, api_key):
-            raise HTTPException(status_code=401, detail="Invalid API key")
+            raise HTTPException(status_code=401, detail="Invalid API key", headers={'WWW-Authenticate':'Basic realm="Fisheye"'})
 
     @app.get("/v1/health")
     async def health() -> dict[str, Any]:
@@ -37,9 +47,19 @@ def register_routes(app: FastAPI, runtime: Any, api_key: str | None = None) -> N
                 {"loc": list(e["loc"]), "type": e["type"], "msg": e["msg"]}
                 for e in exc.errors(include_input=False)
             ]) from exc
-        ingested = await ingest_service.ingest(events)
+        receipts = []
+        for event in events:
+            # Bind remote identities to the configured application and producer.
+            event.application_id = runtime.config.api.application_id
+            event.producer_id = runtime.config.api.producer_id
+            event.meta.pop('_analysis', None)
+            try:
+                receipts.append(asdict(await runtime.publish(event)))
+            except (OverloadedError, EventConflictError) as exc:
+                raise HTTPException(status_code=429 if isinstance(exc, OverloadedError) else 409,
+                                    detail={'error':str(exc),'accepted':receipts},headers={'Retry-After':'1'}) from exc
         await runtime.drain(timeout=2.0)
-        return {"ingested": ingested}
+        return {"ingested": len(receipts), "receipts": receipts}
 
     @app.get("/v1/alerts")
     async def list_alerts(
@@ -85,4 +105,10 @@ def register_routes(app: FastAPI, runtime: Any, api_key: str | None = None) -> N
     async def dashboard(_: None = Depends(_auth)) -> str:
         alerts = await runtime.store.list_alerts(limit=30)
         runs = await runtime.store.list_runs(limit=30)
-        return render_dashboard(alerts, runs)
+        workflows = await runtime.store.list_workflows(runtime.config.api.application_id)
+        supervisor = getattr(runtime, 'supervisor', None)
+        reviews = await supervisor.list_reviews() if supervisor else []
+        return render_dashboard(alerts, runs, workflows, reviews)
+
+    from fisheye.api.oversight import register_oversight_routes
+    register_oversight_routes(app, runtime, _auth)

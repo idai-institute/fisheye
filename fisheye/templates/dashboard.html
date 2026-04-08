@@ -1,66 +1,22 @@
 <!doctype html>
-<html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>fisheye dashboard</title>
-    <style>
-      body { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; margin: 1rem; background: #f2f5f8; color: #0b1d2a; }
-      h1, h2 { margin-bottom: .3rem; }
-      .grid { display: grid; grid-template-columns: 1fr; gap: 1rem; }
-      table { width: 100%; border-collapse: collapse; background: white; }
-      th, td { border: 1px solid #dbe3ea; padding: .45rem; text-align: left; font-size: .92rem; }
-      th { background: #edf3f9; }
-      .card { border: 1px solid #dbe3ea; border-radius: 8px; padding: 1rem; background: white; }
-      @media (min-width: 1000px) { .grid { grid-template-columns: 1.2fr 1fr; } }
-    </style>
-  </head>
-  <body>
-    <h1>fisheye dashboard</h1>
-    <div class="grid">
-      <section class="card">
-        <h2>Recent Alerts</h2>
-        <table>
-          <thead>
-            <tr><th>timestamp</th><th>category</th><th>score</th><th>agent</th><th>run</th></tr>
-          </thead>
-          <tbody>
-            {% for item in alerts %}
-              <tr>
-                <td>{{ item.timestamp }}</td>
-                <td>{{ item.category }}</td>
-                <td>{{ '%.3f' | format(item.score) }}</td>
-                <td>{{ item.agent_id }}</td>
-                <td>{{ item.run_id }}</td>
-              </tr>
-            {% else %}
-              <tr><td colspan="5">No alerts</td></tr>
-            {% endfor %}
-          </tbody>
-        </table>
-      </section>
-
-      <section class="card">
-        <h2>Runs</h2>
-        <table>
-          <thead>
-            <tr><th>run_id</th><th>agent_id</th><th>first_seen</th><th>last_seen</th><th>events</th></tr>
-          </thead>
-          <tbody>
-            {% for item in runs %}
-              <tr>
-                <td>{{ item.run_id }}</td>
-                <td>{{ item.agent_id }}</td>
-                <td>{{ item.first_seen }}</td>
-                <td>{{ item.last_seen }}</td>
-                <td>{{ item.event_count }}</td>
-              </tr>
-            {% else %}
-              <tr><td colspan="5">No runs</td></tr>
-            {% endfor %}
-          </tbody>
-        </table>
-      </section>
-    </div>
-  </body>
-</html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Fisheye · Workflows</title>
+<style>
+:root{color-scheme:dark;--bg:#10151e;--card:#192231;--ink:#eef4fc;--muted:#a9b7ca;--accent:#8be0c0}*{box-sizing:border-box}body{font:15px system-ui,sans-serif;background:var(--bg);color:var(--ink);max-width:1200px;margin:auto;padding:36px 24px}a{color:var(--accent)}header{display:flex;align-items:center;justify-content:space-between;margin-bottom:32px}h1{margin:0;font-size:30px}p,small{color:var(--muted)}section{background:var(--card);border:1px solid #2e3c51;border-radius:12px;padding:22px;margin:20px 0}table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:12px 8px;border-bottom:1px solid #304058}th{color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.08em}pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#10151e;padding:12px;border-radius:6px}button{cursor:pointer;padding:9px 14px;border-radius:6px;border:1px solid #6b8ea1;background:#183e35;color:var(--ink)}button.deny{background:#512931}input{background:#10151e;color:var(--ink);padding:10px;border:1px solid #53657f;border-radius:6px}.review{padding:16px 0;border-bottom:1px solid #304058}.empty{padding:24px 0;color:var(--muted)}.notice{color:#f3cd87}
+</style></head><body>
+<header><div><h1>Fisheye</h1><p>Follow the work. Understand the decisions.</p></div><a href="/v2/health">Oversight health</a></header>
+<section><h2>Workflows</h2><table><thead><tr><th>Workflow</th><th>Agents</th><th>Events</th><th>Last activity</th></tr></thead><tbody>
+{% for w in workflows %}<tr><td><a href="/workflows/{{ w.workflow_id|urlencode }}?environment={{ w.environment|urlencode }}">{{ w.workflow_id }}</a><br><small>{{ w.environment }}</small></td><td>{{ w.agent_ids|join(', ') }}</td><td>{{ w.event_count }}</td><td>{{ w.last_seen }}</td></tr>
+{% else %}<tr><td colspan="4" class="empty">No workflows recorded yet. Run an instrumented workflow to begin.</td></tr>{% endfor %}
+</tbody></table></section>
+<section><h2>Awaiting review <small>({{ reviews|length }})</small></h2>
+{% if reviews %}<p>Review the exact action and its destination. Approval permits one execution before expiry.</p><label>Reviewer credential <input type="password" id="review-key" autocomplete="off"></label>{% endif %}
+{% for r in reviews %}<article class="review"><strong>{{ r.action.tool_name }}</strong> · {{ r.action.agent_id }} · {{ r.action.workflow_id }}<p>Expires {{ r.expires_at }}</p><pre>{{ r.action|tojson(indent=2) }}</pre>
+<button data-action="{{ r.action_id }}" data-digest="{{ r.action_digest }}" data-approve="true">Approve once</button> <button class="deny" data-action="{{ r.action_id }}" data-digest="{{ r.action_digest }}" data-approve="false">Deny</button><p class="result" role="status"></p></article>
+{% else %}<p class="empty">No actions awaiting review.</p>{% endfor %}</section>
+<section><h2>Recent detector activity</h2><table><thead><tr><th>Category</th><th>Agent</th><th>Run</th><th>Score</th></tr></thead><tbody>{% for a in alerts %}<tr><td>{{ a.category }}</td><td>{{ a.agent_id }}</td><td>{{ a.run_id }}</td><td>{{ '%.2f'|format(a.score) }}</td></tr>{% else %}<tr><td colspan="4" class="empty">No detector activity.</td></tr>{% endfor %}</tbody></table></section>
+<script>
+for(const button of document.querySelectorAll('[data-action]')) button.addEventListener('click',async()=>{
+const result=button.closest('article').querySelector('.result'); button.disabled=true;
+try {const response=await fetch('/v2/reviews/'+encodeURIComponent(button.dataset.action),{method:'POST',headers:{'Content-Type':'application/json','X-Review-Key':document.getElementById('review-key').value},body:JSON.stringify({action_digest:button.dataset.digest,approve:button.dataset.approve==='true'})}); const data=await response.json(); result.textContent=response.ok?'Decision saved: '+data.status:JSON.stringify(data.detail); if(response.ok) for(const b of button.closest('article').querySelectorAll('button')) b.disabled=true; else button.disabled=false;}catch(error){result.textContent='Could not save the decision. Retry after checking the connection.';button.disabled=false;}
+});
+</script></body></html>
