@@ -36,7 +36,8 @@ class DataExfiltrationDetector(Detector):
         for label, pattern in SENSITIVE_PATTERNS:
             if pattern.search(text):
                 hits.append(label)
-        if len(text) >= 20 and shannon_entropy(text) > 4.3:
+        candidates = re.findall(r"[A-Za-z0-9+/=_-]{24,}", text)
+        if any(any(c.isdigit() for c in token) and shannon_entropy(token) > 4.3 for token in candidates):
             hits.append("high_entropy")
         return sorted(set(hits))
 
