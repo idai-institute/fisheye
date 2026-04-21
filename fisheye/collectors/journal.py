@@ -192,3 +192,23 @@ class JournalStore(SQLiteStore):
         nodes=graph.get('nodes',{})
         return dict(nodes=list(nodes.values()),edges=[{'source':p,'target':key} for key,node in nodes.items() for p in node['parents']],
                     tasks=graph.get('tasks',{}),usage=graph.get('usage',{}),truncated=graph.get('truncated',False))
+
+    async def prune(self, retention_days=30, state_ttl_seconds=86400, now=None):
+        from datetime import timedelta
+        now=now or datetime.now(timezone.utc)
+        cutoff=(now-timedelta(days=retention_days)).isoformat()
+        state_cutoff=(now-timedelta(seconds=state_ttl_seconds)).isoformat()
+        def remove():
+            with self._lock,self._conn:
+                states=self._conn.execute('DELETE FROM checkpoints WHERE updated_at<? AND scope NOT IN (SELECT scope FROM journal WHERE processed=0)',(state_cutoff,)).rowcount
+                rows=self._conn.execute("SELECT event_id FROM journal j WHERE processed=1 AND accepted_at<? AND NOT EXISTS (SELECT 1 FROM findings f,json_each(json_extract(f.data_json,'$.event_ids')) e WHERE f.status IN ('open','acknowledged') AND e.value=j.event_id)",(cutoff,)).fetchall()
+                ids=[(r['event_id'],) for r in rows]
+                self._conn.executemany('DELETE FROM events WHERE event_id=?',ids)
+                self._conn.executemany('DELETE FROM detector_signals WHERE event_id=?',ids)
+                self._conn.executemany('DELETE FROM journal WHERE event_id=?',ids)
+                self._conn.execute('DELETE FROM behavior_stats WHERE timestamp<?',(cutoff,))
+                self._conn.execute('DELETE FROM dead_letters WHERE timestamp<?',(cutoff,))
+                self._conn.execute('UPDATE runs SET event_count=(SELECT COUNT(*) FROM events WHERE events.run_id=runs.run_id)')
+                self._conn.execute('DELETE FROM runs WHERE event_count=0')
+                return dict(events=len(ids),checkpoints=states)
+        return await asyncio.to_thread(remove)
