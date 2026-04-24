@@ -50,3 +50,50 @@ class CamelAdapter(AdapterBase):
             return result
 
         return wrapper
+
+    def wrap_agent(self, agent):
+        """Explicit ChatAgent proxy; no global hooks or monkeypatching."""
+        from fisheye.adapters.serialization import json_safe
+
+        adapter = self
+
+        class ObservedAgent:
+            def __getattr__(self, name):
+                return getattr(agent, name)
+
+            async def astep(self, input_message, *args, **kwargs):
+                await adapter.emit("agent.start", {})
+                request = await adapter.emit(
+                    "llm.request", json_safe({"content": getattr(input_message, "content", input_message)})
+                )
+                try:
+                    result = await agent.astep(input_message, *args, **kwargs)
+                except BaseException as exc:
+                    await adapter.emit("agent.error", {"error_type": type(exc).__name__}, links=[request.event_id])
+                    raise
+                await adapter.emit(
+                    "llm.response",
+                    json_safe({"messages": [getattr(m, "content", "") for m in result.msgs], "info": result.info}),
+                    links=[request.event_id],
+                )
+                await adapter.emit("agent.stop", {"terminated": result.terminated})
+                return result
+
+            def step(self, input_message, *args, **kwargs):
+                import asyncio
+
+                try:
+                    asyncio.get_running_loop()
+                except RuntimeError:
+                    result = adapter.runtime.submit(self.astep(input_message, *args, **kwargs))
+                    return result.result() if hasattr(result, "result") else result
+                raise RuntimeError("Use astep inside an event loop")
+
+        return ObservedAgent()
+
+    def as_function_tool(self, func, name=None):
+        from camel.toolkits import FunctionTool
+
+        from fisheye.adapters.generic import GenericAdapter
+
+        return FunctionTool(GenericAdapter.wrap_tool(self, name or func.__name__, func))

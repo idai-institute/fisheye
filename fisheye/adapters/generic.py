@@ -1,10 +1,10 @@
 from __future__ import annotations
 
+import asyncio
+import time
 from collections.abc import Callable
 from functools import wraps
 from typing import Any
-import asyncio
-import time
 from uuid import uuid4
 
 from fisheye.adapters.base import AdapterBase
@@ -51,12 +51,15 @@ class GenericAdapter(AdapterBase):
 
     def wrap_tool(self, tool_name: str, func: Callable[..., Any]) -> Callable[..., Any]:
         if hasattr(func, "__call__"):
+
             @wraps(func)
             async def wrapper(*args: Any, **kwargs: Any) -> Any:
                 call_id = uuid4().hex
                 started = time.perf_counter()
-                first = await self.emit("tool.call.start", {"tool_name": tool_name, "call_id": call_id,
-                                                            "arguments": {"args": list(args), "kwargs": kwargs}})
+                first = await self.emit(
+                    "tool.call.start",
+                    {"tool_name": tool_name, "call_id": call_id, "arguments": {"args": list(args), "kwargs": kwargs}},
+                )
                 try:
                     result = await self._run_callable(func, *args, **kwargs)
                 except (Exception, asyncio.CancelledError) as exc:
@@ -66,8 +69,16 @@ class GenericAdapter(AdapterBase):
                         links=[first.event_id],
                     )
                     raise
-                await self.emit("tool.call.end", {"tool_name": tool_name, "call_id": call_id, "output": result,
-                                                  "latency_ms": (time.perf_counter() - started) * 1000}, links=[first.event_id])
+                await self.emit(
+                    "tool.call.end",
+                    {
+                        "tool_name": tool_name,
+                        "call_id": call_id,
+                        "output": result,
+                        "latency_ms": (time.perf_counter() - started) * 1000,
+                    },
+                    links=[first.event_id],
+                )
                 return result
 
             return wrapper

@@ -10,7 +10,7 @@ from fisheye.adapters.base import AdapterBase
 
 class OpenAIAgentsAdapter(AdapterBase):
     framework = "openai_agents"
-    capabilities = {'observe': True, 'native_hooks': True, 'pre_action': False, 'pause_resume': False}
+    capabilities = {"observe": True, "native_hooks": True, "pre_action": False, "pause_resume": False}
 
     def as_run_hooks(self):
         return native_run_hooks(self)
@@ -95,38 +95,58 @@ class OpenAIAgentsEventHook:
 
 def native_run_hooks(adapter):
     """Return real RunHooks; install fisheye[openai-agents] to use this bridge."""
-    from agents import RunHooks
     from contextvars import ContextVar
     from uuid import uuid4
+
+    from agents import RunHooks
+
     from fisheye.adapters.serialization import json_safe
-    call=ContextVar('fisheye_openai_call',default=None)
+
+    call = ContextVar("fisheye_openai_call", default=None)
 
     class Hooks(RunHooks):
-        async def emit_for(self,agent,kind,payload,**kwargs):
+        async def emit_for(self, agent, kind, payload, **kwargs):
             from fisheye.schema.events import EventEnvelope
-            event=EventEnvelope(schema_version='2',event_type=kind,agent_id=agent.name,
-                run_id=adapter.run_id,workflow_id=adapter.run_id,framework='openai_agents',payload=json_safe(payload),**kwargs)
+
+            event = EventEnvelope(
+                schema_version="2",
+                event_type=kind,
+                agent_id=agent.name,
+                run_id=adapter.run_id,
+                workflow_id=adapter.run_id,
+                framework="openai_agents",
+                payload=json_safe(payload),
+                **kwargs,
+            )
             await adapter.runtime.publish(event)
             return event
 
-        async def on_agent_start(self,context,agent):
-            await self.emit_for(agent,'agent.start',{})
+        async def on_agent_start(self, context, agent):
+            await self.emit_for(agent, "agent.start", {})
 
-        async def on_agent_end(self,context,agent,output):
-            await self.emit_for(agent,'llm.response',dict(output=output,token_count=context.usage.total_tokens))
-            await self.emit_for(agent,'agent.stop',{})
+        async def on_agent_end(self, context, agent, output):
+            await self.emit_for(agent, "llm.response", dict(output=output, token_count=context.usage.total_tokens))
+            await self.emit_for(agent, "agent.stop", {})
 
-        async def on_handoff(self,context,from_agent,to_agent):
-            await self.emit_for(from_agent,'task.delegated',dict(task_id=uuid4().hex,recipient_id=to_agent.name))
+        async def on_handoff(self, context, from_agent, to_agent):
+            await self.emit_for(from_agent, "task.delegated", dict(task_id=uuid4().hex, recipient_id=to_agent.name))
 
-        async def on_tool_start(self,context,agent,tool):
-            first=await self.emit_for(agent,'tool.call.start',dict(tool_name=tool.name))
-            call.set((first.event_id,time.perf_counter()))
+        async def on_tool_start(self, context, agent, tool):
+            first = await self.emit_for(agent, "tool.call.start", dict(tool_name=tool.name))
+            call.set((first.event_id, time.perf_counter()))
 
-        async def on_tool_end(self,context,agent,tool,result):
-            previous=call.get()
-            await self.emit_for(agent,'tool.call.end',dict(tool_name=tool.name,output=result,
-                latency_ms=(time.perf_counter()-previous[1])*1000 if previous else None),
-                links=[previous[0]] if previous else [])
+        async def on_tool_end(self, context, agent, tool, result):
+            previous = call.get()
+            await self.emit_for(
+                agent,
+                "tool.call.end",
+                dict(
+                    tool_name=tool.name,
+                    output=result,
+                    latency_ms=(time.perf_counter() - previous[1]) * 1000 if previous else None,
+                ),
+                links=[previous[0]] if previous else [],
+            )
             call.set(None)
+
     return Hooks()
