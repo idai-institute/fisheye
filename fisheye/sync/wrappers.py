@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from concurrent.futures import Future
-from threading import Event, Thread, current_thread
+from threading import Event, Lock, Thread, current_thread
 from typing import Any, Coroutine
 
 from fisheye.runtime import FisheyeRuntime
@@ -16,8 +16,13 @@ class SyncFisheyeRuntime:
         self.runtime = runtime
         self._loop: asyncio.AbstractEventLoop | None = None
         self._thread: Thread | None = None
+        self._bootstrap_lock = Lock()
 
     def _ensure_loop(self) -> asyncio.AbstractEventLoop:
+        with self._bootstrap_lock:
+            return self._start_loop()
+
+    def _start_loop(self) -> asyncio.AbstractEventLoop:
         if self._loop is not None:
             return self._loop
         ready = Event()

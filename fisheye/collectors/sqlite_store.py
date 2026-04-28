@@ -10,9 +10,9 @@ from typing import Any
 
 from fisheye.collectors.base import AlertSink, Collector
 from fisheye.detectors.base import DetectorSignal
+from fisheye.privacy import redact
 from fisheye.schema.alerts import Alert
 from fisheye.schema.events import EventEnvelope
-from fisheye.privacy import redact
 
 
 @dataclass(slots=True)
@@ -116,9 +116,10 @@ class SQLiteStore(Collector, AlertSink):
             )
             self._commit()
 
-    @staticmethod
-    def _json(data: Any) -> str:
-        return json.dumps(redact(data), default=str, separators=(",", ":"))
+    def _json(self, data: Any) -> str:
+        return json.dumps(
+            data if getattr(self, "raw_capture", False) else redact(data), default=str, separators=(",", ":")
+        )
 
     @staticmethod
     def _decode_json(value: str | None, default: Any) -> Any:

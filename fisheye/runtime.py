@@ -4,17 +4,14 @@ import asyncio
 from pathlib import Path
 from typing import Any, Coroutine
 
-from fisheye.behavior.monitor import StatisticalBehaviorMonitor
+from fisheye.analysis import AnalysisProcessor
 from fisheye.bus.async_bus import AsyncEventBus, DeliveryReceipt
 from fisheye.bus.routing import Route, RouteMode, Router
 from fisheye.collectors.base import Collector
+from fisheye.collectors.journal import JournalStore
 from fisheye.collectors.jsonl_logger import JsonlLoggerCollector
 from fisheye.collectors.sqlite_store import SQLiteStore
 from fisheye.config import FisheyeConfig
-from fisheye.detectors.dos import DoSDetector
-from fisheye.detectors.engine import DetectorEngine
-from fisheye.detectors.exfiltration import DataExfiltrationDetector
-from fisheye.detectors.prompt_injection import PromptInjectionDetector
 from fisheye.preprocessors.base import Preprocessor
 from fisheye.preprocessors.buffering import BufferingPreprocessor
 from fisheye.preprocessors.embeddings import EmbeddingPreprocessor, LocalHashEmbeddingProvider, NoopEmbeddingProvider
@@ -23,10 +20,8 @@ from fisheye.preprocessors.hashing import HashFingerprintPreprocessor
 from fisheye.preprocessors.pipeline import PreprocessorPipeline
 from fisheye.preprocessors.redaction import PIIRedactionPreprocessor, SecretRedactionPreprocessor
 from fisheye.preprocessors.urls import URLDomainExtractionPreprocessor
-from fisheye.schema.events import EventEnvelope
-from fisheye.collectors.journal import JournalStore
-from fisheye.analysis import AnalysisProcessor
 from fisheye.privacy import capture_event
+from fisheye.schema.events import EventEnvelope
 
 _ROUTE_MODE_META_KEY = "_route_mode"
 
@@ -49,14 +44,17 @@ class _RoutedCollector(Collector):
 class FisheyeRuntime:
     def workflow(self, workflow_id: str | None = None, **kwargs: Any):
         from fisheye.context import Workflow
+
         return Workflow(self, workflow_id, **kwargs)
 
     def sync(self):
         from fisheye.sync.wrappers import SyncFisheyeRuntime
+
         return SyncFisheyeRuntime(self)
 
     def supervise(self, policy, tools=None):
         from fisheye.policies import Supervisor
+
         if not isinstance(self.store, JournalStore):
             raise ValueError("Supervision requires a durable store")
         self.supervisor = Supervisor(self.store, policy, tools, runtime=self)
@@ -90,6 +88,9 @@ class FisheyeRuntime:
         self._wake = asyncio.Event()
         self._analysis_error: str | None = None
         self._journal_metrics: dict[str, Any] = {}
+        self._export_task: asyncio.Task[None] | None = None
+        self._export_error: str | None = None
+        self._callback_errors: list[str] = []
 
     def submit(self, coroutine: Coroutine[Any, Any, Any]) -> Any:
         try:
@@ -101,9 +102,18 @@ class FisheyeRuntime:
         if loop is not None:
             task = loop.create_task(coroutine)
             self._pending.add(task)
+
+            def completed(task):
+                self._pending.discard(task)
+                if not task.cancelled() and task.exception():
+                    self._callback_errors.append(type(task.exception()).__name__)
+                    self._callback_errors[:] = self._callback_errors[-100:]
+
+            task.add_done_callback(completed)
             return task
         if self._sync_bridge is None:
             from fisheye.sync.wrappers import SyncFisheyeRuntime
+
             self._sync_bridge = SyncFisheyeRuntime(self)
         return self._sync_bridge.submit(coroutine).result()
 
@@ -162,7 +172,9 @@ class FisheyeRuntime:
         self._started = True
         self._flush_task = asyncio.create_task(self._flush_periodically())
         if self.analysis is not None and isinstance(self.store, JournalStore):
+            await self.store.prune(self.config.storage.retention_days, self.config.storage.state_ttl_seconds)
             self._journal_task = asyncio.create_task(self._process_journal())
+            self._export_task = asyncio.create_task(self._export_journal())
             self._wake.set()
 
     async def _process_journal(self) -> None:
@@ -173,14 +185,12 @@ class FisheyeRuntime:
                 pending = await self.store.pending()
                 for sequence, event in pending:
                     result = await self.analysis.analyze(event, await self.store.checkpoint(event.scope))
-                    await self.store.commit_analysis(sequence, event, result.state, result.alerts,
-                                                     result.findings, result.signals, result.errors)
+                    await self.store.commit_analysis(
+                        sequence, event, result.state, result.alerts, result.findings, result.signals, result.errors
+                    )
                     for mode in sorted(self._active_modes()):
                         for projected in await self.preprocessor_pipelines[mode].process(event.model_copy(deep=True)):
                             await self._publish_mode(projected, mode)
-                    if hasattr(self, 'logger'):
-                        for alert in result.alerts:
-                            await self.logger.handle_alert(alert)
                 self._analysis_error = None
                 self._journal_metrics = await self.store.journal_metrics()
                 if pending:
@@ -190,6 +200,28 @@ class FisheyeRuntime:
                 await asyncio.sleep(0.1)
                 continue
             await self._wake.wait()
+
+    async def _export_journal(self) -> None:
+        import json
+
+        from fisheye.schema.alerts import Alert
+
+        while True:
+            try:
+                items = await self.store.pending_exports()
+                for item in items:
+                    data = json.loads(item["data_json"])
+                    if item["kind"] == "event":
+                        await self.logger.handle_event(EventEnvelope.model_validate(data))
+                    else:
+                        await self.logger.handle_alert(Alert.model_validate(data))
+                    await self.store.acknowledge_export(item["id"])
+                self._export_error = None
+                if items:
+                    continue
+            except Exception as exc:
+                self._export_error = type(exc).__name__
+            await asyncio.sleep(0.05)
 
     async def _flush_periodically(self) -> None:
         while True:
@@ -234,6 +266,10 @@ class FisheyeRuntime:
                 self._journal_task.cancel()
                 await asyncio.gather(self._journal_task, return_exceptions=True)
                 self._journal_task = None
+            if self._export_task:
+                self._export_task.cancel()
+                await asyncio.gather(self._export_task, return_exceptions=True)
+                self._export_task = None
             await self.bus.stop()
             self._started = False
 
@@ -244,7 +280,11 @@ class FisheyeRuntime:
         normalized = event if isinstance(event, EventEnvelope) else EventEnvelope.model_validate(event)
 
         if self.analysis is not None and isinstance(self.store, JournalStore):
-            normalized = capture_event(normalized)
+            normalized = capture_event(
+                normalized,
+                raw=self.config.storage.capture == "raw",
+                feature_only=self.config.storage.capture == "features",
+            )
             receipt = await self.store.accept(normalized)
             self._wake.set()
             return receipt
@@ -268,33 +308,51 @@ class FisheyeRuntime:
             await self.publish(event)
 
     async def drain(self, timeout: float | None = None) -> None:
+        if self._callback_errors:
+            errors, self._callback_errors = self._callback_errors, []
+            raise RuntimeError("Callback delivery failed: " + ", ".join(errors))
         pending = self._pending - {asyncio.current_task()}
         if pending:
             await asyncio.wait_for(asyncio.gather(*pending), timeout)
             self._pending.difference_update(pending)
         if self.analysis is not None and isinstance(self.store, JournalStore):
+
             async def finish_journal() -> None:
-                while (await self.store.journal_metrics())['pending']:
+                while (await self.store.journal_metrics())["pending"]:
                     if self._analysis_error:
                         raise RuntimeError(f"Analysis unavailable: {self._analysis_error}")
                     self._wake.set()
                     await asyncio.sleep(0.005)
+
             await asyncio.wait_for(finish_journal(), timeout)
+
+            async def finish_exports():
+                while await self.store.pending_exports(1):
+                    if self._export_error:
+                        raise RuntimeError("Export unavailable: " + self._export_error)
+                    await asyncio.sleep(0.005)
+
+            await asyncio.wait_for(finish_exports(), timeout)
         for mode in sorted(self._active_modes()):
             await self._flush_mode(mode)
         await self.bus.drain(timeout=timeout)
 
     @property
     def metrics(self) -> dict[str, Any]:
-        return dict(self.bus.metrics, journal=self._journal_metrics, analysis_error=self._analysis_error,
-                    coverage=self.analysis.coverage if self.analysis else {})
+        return dict(
+            self.bus.metrics,
+            journal=self._journal_metrics,
+            analysis_error=self._analysis_error,
+            export_error=self._export_error,
+            coverage=self.analysis.coverage if self.analysis else {},
+        )
 
     def list_routes(self) -> dict[int, Route]:
         return self.router.list_routes()
 
     def _active_modes(self) -> set[RouteMode]:
         modes = self.router.active_modes()
-        if modes:
+        if modes or self.analysis is not None:
             return modes
         return set(self.preprocessor_pipelines)
 
@@ -347,28 +405,43 @@ def _build_preprocessor_pipeline(
 def build_default_runtime(config: FisheyeConfig | None = None) -> FisheyeRuntime:
     config = config or FisheyeConfig()
     store = JournalStore(Path(config.storage.sqlite_path), max_pending=config.storage.max_pending)
-    logger = JsonlLoggerCollector(config.storage.events_jsonl_path, config.storage.alerts_jsonl_path)
-    analysis = AnalysisProcessor(thresholds={
-        "prompt_injection": config.thresholds.prompt_injection,
-        "data_exfiltration": config.thresholds.data_exfiltration,
-        "dos": config.thresholds.dos,
-        "behavioral": config.thresholds.behavioral,
-    }, detector_weights=config.detector_weights, config_version=config.fingerprint,
-        min_samples=config.oversight.baseline_min_samples, frozen=config.oversight.baseline_frozen)
+    store.raw_capture = config.storage.capture == "raw"
+    logger = JsonlLoggerCollector(
+        config.storage.events_jsonl_path,
+        config.storage.alerts_jsonl_path,
+        redact_content=config.storage.capture != "raw",
+    )
+    analysis = AnalysisProcessor(
+        thresholds={
+            "prompt_injection": config.thresholds.prompt_injection,
+            "data_exfiltration": config.thresholds.data_exfiltration,
+            "dos": config.thresholds.dos,
+            "behavioral": config.thresholds.behavioral,
+        },
+        detector_weights=config.detector_weights,
+        config_version=config.fingerprint,
+        min_samples=config.oversight.baseline_min_samples,
+        frozen=config.oversight.baseline_frozen,
+    )
     from fisheye.graph import WorkflowGraph
-    analysis.graph = WorkflowGraph(config.oversight.graph_max_events, config.oversight.token_budget,
-                                   config.oversight.cost_budget, config.oversight.call_budget)
+
+    analysis.graph = WorkflowGraph(
+        config.oversight.graph_max_events,
+        config.oversight.token_budget,
+        config.oversight.cost_budget,
+        config.oversight.call_budget,
+    )
     runtime = FisheyeRuntime(
         bus=AsyncEventBus(queue_size=config.bus.queue_size, default_retries=config.bus.retry_attempts, overflow="drop"),
         preprocessor_pipelines={
             "raw": _build_preprocessor_pipeline(config, include_redaction=False, feature_only=False),
             "redacted": _build_preprocessor_pipeline(config, include_redaction=True, feature_only=False),
             "feature_only": _build_preprocessor_pipeline(config, include_redaction=True, feature_only=True),
-        }, store=store,
+        },
+        store=store,
     )
     runtime.analysis = analysis
     runtime.detector_engine = analysis
     runtime.logger = logger
     runtime.config = config
-    runtime.register_collector(logger, mode="redacted")
     return runtime
