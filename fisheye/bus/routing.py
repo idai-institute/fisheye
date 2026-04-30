@@ -5,6 +5,7 @@ from typing import Literal
 
 RouteMode = Literal["raw", "redacted", "feature_only"]
 
+
 @dataclass(slots=True)
 class Route:
     collector_name: str

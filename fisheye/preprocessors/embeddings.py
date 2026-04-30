@@ -11,8 +11,7 @@ from fisheye.schema.events import EventEnvelope
 
 
 class EmbeddingProvider(Protocol):
-    async def embed(self, text: str) -> list[float]:
-        ...
+    async def embed(self, text: str) -> list[float]: ...
 
 
 class LocalHashEmbeddingProvider:

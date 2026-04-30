@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from collections import Counter, defaultdict, deque
 from datetime import datetime, timedelta, timezone
-from typing import Any
 from uuid import uuid4
 
 from fisheye.behavior.online_stats import EwmaTracker, ToolDistributionTracker
@@ -38,7 +37,9 @@ class StatisticalBehaviorMonitor(Collector):
         self._event_outcomes: dict[str, deque[tuple[datetime, int]]] = defaultdict(lambda: deque(maxlen=10000))
         self._tool_recent: dict[str, deque[str]] = defaultdict(lambda: deque(maxlen=100))
 
-        factory = lambda: EwmaTracker(min_samples=min_samples, frozen=frozen)
+        def factory():
+            return EwmaTracker(min_samples=min_samples, frozen=frozen)
+
         self._tool_rate_stats: dict[tuple[str, str], EwmaTracker] = defaultdict(factory)
         self._latency_stats: dict[tuple[str, str], EwmaTracker] = defaultdict(factory)
         self._token_stats: dict[str, EwmaTracker] = defaultdict(factory)
@@ -49,7 +50,7 @@ class StatisticalBehaviorMonitor(Collector):
         # Keep high-cardinality tool/agent dimensions bounded inside a workflow.
         for value in vars(self).values():
             if isinstance(value, defaultdict) and len(value) > 1000:
-                for key in list(value)[:len(value) - 1000]:
+                for key in list(value)[: len(value) - 1000]:
                     del value[key]
         alerts: list[Alert] = []
 

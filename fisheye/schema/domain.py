@@ -1,14 +1,16 @@
 """Portable contracts for workflow relationships and policy evidence."""
+
 from __future__ import annotations
 
 from datetime import datetime, timezone
 from typing import Any, Literal
 from uuid import uuid4
+
 from pydantic import BaseModel, ConfigDict, Field
 
 
 class Payload(BaseModel):
-    model_config = ConfigDict(extra='forbid')
+    model_config = ConfigDict(extra="forbid")
 
 
 class Delegation(Payload):
@@ -23,15 +25,15 @@ class Delegation(Payload):
 class Message(Payload):
     message_id: str = Field(default_factory=lambda: uuid4().hex)
     recipient_id: str
-    content: str = ''
+    content: str = ""
     source_event_ids: list[str] = Field(default_factory=list)
     artifact_ids: list[str] = Field(default_factory=list)
-    trust: Literal['trusted', 'untrusted', 'unknown', 'quoted'] = 'unknown'
+    trust: Literal["trusted", "untrusted", "unknown", "quoted"] = "unknown"
 
 
 class Artifact(Payload):
     artifact_id: str
-    classification: Literal['public', 'internal', 'confidential', 'secret'] = 'public'
+    classification: Literal["public", "internal", "confidential", "secret"] = "public"
     source_event_ids: list[str] = Field(default_factory=list)
     content: str | None = None
     destination: str | None = None
@@ -40,7 +42,7 @@ class Artifact(Payload):
 
 class TaskStatus(Payload):
     task_id: str
-    status: Literal['started', 'waiting', 'completed', 'failed', 'cancelled']
+    status: Literal["started", "waiting", "completed", "failed", "cancelled"]
     waits_for: list[str] = Field(default_factory=list)
     required_artifacts: list[str] = Field(default_factory=list)
     artifact_ids: list[str] = Field(default_factory=list)
@@ -56,19 +58,19 @@ class Usage(Payload):
 
 class Finding(BaseModel):
     finding_id: str
-    application_id: str = 'default'
+    application_id: str = "default"
     workflow_id: str
     category: str
-    severity: Literal['info', 'low', 'medium', 'high', 'critical'] = 'medium'
+    severity: Literal["info", "low", "medium", "high", "critical"] = "medium"
     score: float = Field(ge=0, le=1, allow_inf_nan=False)
-    score_kind: Literal['heuristic', 'calibrated'] = 'heuristic'
+    score_kind: Literal["heuristic", "calibrated"] = "heuristic"
     title: str
     agent_ids: list[str] = Field(default_factory=list)
     event_ids: list[str] = Field(default_factory=list)
     evidence: dict[str, Any] = Field(default_factory=dict)
-    status: Literal['open', 'acknowledged', 'resolved', 'false_positive'] = 'open'
-    detector_version: str = '2.0'
-    config_version: str = ''
+    status: Literal["open", "acknowledged", "resolved", "false_positive"] = "open"
+    detector_version: str = "2.0"
+    config_version: str = ""
     first_seen: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     last_seen: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     occurrences: int = 1
@@ -76,10 +78,10 @@ class Finding(BaseModel):
 
 class PluginSpec(BaseModel):
     plugin_id: str
-    version: str = '1'
-    schema_versions: tuple[str, ...] = ('1', '2')
+    version: str = "1"
+    schema_versions: tuple[str, ...] = ("1", "2")
     event_types: tuple[str, ...] = ()
-    scope: Literal['agent', 'workflow'] = 'workflow'
+    scope: Literal["agent", "workflow"] = "workflow"
     requires_content: bool = False
     timeout_seconds: float = Field(default=1, gt=0)
     state_ttl_seconds: int = Field(default=86400, gt=0)

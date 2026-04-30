@@ -1,3 +1,3 @@
-from fisheye.evaluation.replay import replay, evaluate, compare
+from fisheye.evaluation.replay import compare, evaluate, replay
 
-__all__ = ['replay', 'evaluate', 'compare']
+__all__ = ["replay", "evaluate", "compare"]

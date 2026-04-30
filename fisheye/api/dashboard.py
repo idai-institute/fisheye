@@ -18,4 +18,4 @@ def render_dashboard(alerts: list[dict[str, Any]], runs: list[dict[str, Any]], w
 
 
 def render_investigation(workflow_id, graph, findings):
-    return _ENV.get_template('investigation.html').render(workflow_id=workflow_id, graph=graph, findings=findings)
+    return _ENV.get_template("investigation.html").render(workflow_id=workflow_id, graph=graph, findings=findings)

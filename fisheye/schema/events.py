@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+import json
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Literal
-import json
 from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
 from fisheye.schema.domain import Artifact, Delegation, Message, TaskStatus, Usage
 
 
@@ -89,9 +90,14 @@ class EventEnvelope(BaseModel):
 
     @model_validator(mode="after")
     def _validate_payload(self) -> "EventEnvelope":
-        models = {"task.delegated": Delegation, "message.sent": Message,
-                  "artifact.created": Artifact, "artifact.transferred": Artifact,
-                  "task.status": TaskStatus, "usage.recorded": Usage}
+        models = {
+            "task.delegated": Delegation,
+            "message.sent": Message,
+            "artifact.created": Artifact,
+            "artifact.transferred": Artifact,
+            "task.status": TaskStatus,
+            "usage.recorded": Usage,
+        }
         if self.schema_version == "2" and self.event_type in models:
             self.payload = models[self.event_type].model_validate(self.payload).model_dump(mode="json")
         try:

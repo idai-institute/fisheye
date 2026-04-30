@@ -50,4 +50,5 @@ def test_async_drain_awaits_callback_submissions():
             adapter.as_callback_handler().on_llm_start({}, ["hello"])
             await runtime.drain(2)
             assert len(recorder.events) == 1
+
     asyncio.run(run())
