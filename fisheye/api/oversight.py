@@ -63,10 +63,8 @@ def register_oversight_routes(app, runtime, auth):
 
     @app.patch("/v2/findings/{finding_id}", dependencies=[Depends(auth)])
     async def update_finding(finding_id: str, body: FindingBody, actor: str = Depends(reviewer)):
-        rows = await runtime.store.list_findings(limit=1000)
-        if not any(
-            f["finding_id"] == finding_id and f["application_id"] == runtime.config.api.application_id for f in rows
-        ):
+        finding = await runtime.store.get_finding(finding_id)
+        if not finding or finding["application_id"] != runtime.config.api.application_id:
             raise HTTPException(404, "Finding not found")
         try:
             return await runtime.store.update_finding(finding_id, body.status, actor)
@@ -105,7 +103,7 @@ def register_oversight_routes(app, runtime, auth):
     @app.get("/v2/health", dependencies=[Depends(auth)])
     async def health():
         return dict(
-            status="degraded" if runtime._analysis_error else "ok",
+            status="degraded" if runtime._analysis_error or runtime._export_error else "ok",
             journal=await runtime.store.journal_metrics(),
             coverage=runtime.analysis.coverage,
             delivery=runtime.metrics,

@@ -314,3 +314,55 @@ class JournalStore(SQLiteStore):
                 self._conn.execute("DELETE FROM export_outbox WHERE id=?", (item_id,))
 
         await asyncio.to_thread(ack)
+
+    async def scoped_alerts(
+        self, application_id, limit=100, triggered_only=False, min_score=None, run_id=None, alert_id=None
+    ):
+        terms = [
+            "EXISTS (SELECT 1 FROM json_each(a.related_event_ids_json) e JOIN journal j ON j.event_id=e.value WHERE json_extract(j.event_json,'$.application_id')=?)"
+        ]
+        args = [application_id]
+        for field, value in [("run_id", run_id), ("alert_id", alert_id)]:
+            if value is not None:
+                terms.append("a." + field + "=?")
+                args.append(value)
+        if triggered_only:
+            terms.append("a.triggered=1")
+        if min_score is not None:
+            terms.append("a.score>=?")
+            args.append(min_score)
+        rows = await asyncio.to_thread(
+            self._query,
+            "SELECT a.* FROM alerts a WHERE " + " AND ".join(terms) + " ORDER BY a.timestamp DESC LIMIT ?",
+            tuple(args + [limit]),
+        )
+        return [self._alert_row_to_dict(r) for r in rows]
+
+    async def scoped_runs(self, application_id, limit=100):
+        rows = await asyncio.to_thread(
+            self._query,
+            "SELECT json_extract(event_json,'$.run_id') run_id, MIN(accepted_at) first_seen, MAX(accepted_at) last_seen, COUNT(*) event_count, GROUP_CONCAT(DISTINCT json_extract(event_json,'$.agent_id')) agents FROM journal WHERE json_extract(event_json,'$.application_id')=? GROUP BY json_extract(event_json,'$.run_id') ORDER BY last_seen DESC LIMIT ?",
+            (application_id, limit),
+        )
+        return [
+            dict(
+                run_id=r["run_id"],
+                first_seen=r["first_seen"],
+                last_seen=r["last_seen"],
+                event_count=r["event_count"],
+                agent_ids=r["agents"].split(","),
+            )
+            for r in rows
+        ]
+
+    async def scoped_run_events(self, application_id, run_id, limit=500):
+        rows = await asyncio.to_thread(
+            self._query,
+            "SELECT event_json FROM journal WHERE json_extract(event_json,'$.application_id')=? AND json_extract(event_json,'$.run_id')=? ORDER BY sequence LIMIT ?",
+            (application_id, run_id, limit),
+        )
+        return [json.loads(r["event_json"]) for r in rows]
+
+    async def get_finding(self, finding_id):
+        rows = await asyncio.to_thread(self._query, "SELECT data_json FROM findings WHERE finding_id=?", (finding_id,))
+        return json.loads(rows[0]["data_json"]) if rows else None

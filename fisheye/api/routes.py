@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+import asyncio
 import base64
 import hmac
 from dataclasses import asdict
 from typing import Annotated, Any
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import ValidationError
 
 from fisheye.api.dashboard import render_dashboard
@@ -34,7 +35,10 @@ def register_routes(app: FastAPI, runtime: Any, api_key: str | None = None) -> N
 
     @app.get("/v1/health")
     async def health() -> dict[str, Any]:
-        return {"status": "ok", "runtime_started": getattr(runtime, "_started", False)}
+        return {
+            "status": "degraded" if runtime._analysis_error or runtime._export_error else "ok",
+            "runtime_started": getattr(runtime, "_started", False),
+        }
 
     @app.post("/v1/events")
     async def ingest_events(payload: dict[str, Any] | list[dict[str, Any]], _: None = Depends(_auth)) -> dict[str, Any]:
@@ -64,7 +68,12 @@ def register_routes(app: FastAPI, runtime: Any, api_key: str | None = None) -> N
                     detail={"error": str(exc), "accepted": receipts},
                     headers={"Retry-After": "1"},
                 ) from exc
-        await runtime.drain(timeout=2.0)
+        try:
+            await runtime.drain(timeout=2.0)
+        except (asyncio.TimeoutError, RuntimeError):
+            return JSONResponse(
+                {"ingested": len(receipts), "receipts": receipts, "processing": "pending_or_degraded"}, status_code=202
+            )
         return {"ingested": len(receipts), "receipts": receipts}
 
     @app.get("/v1/alerts")
@@ -74,30 +83,32 @@ def register_routes(app: FastAPI, runtime: Any, api_key: str | None = None) -> N
         min_score: float | None = Query(None, ge=0, le=1),
         _: None = Depends(_auth),
     ) -> list[dict[str, Any]]:
-        return await runtime.store.list_alerts(limit=limit, triggered_only=triggered_only, min_score=min_score)
+        return await runtime.store.scoped_alerts(
+            runtime.config.api.application_id, limit=limit, triggered_only=triggered_only, min_score=min_score
+        )
 
     @app.get("/v1/alerts/{alert_id}")
     async def get_alert(alert_id: str, _: None = Depends(_auth)) -> dict[str, Any]:
-        alert = await runtime.store.get_alert(alert_id)
-        if alert is None:
+        alerts = await runtime.store.scoped_alerts(runtime.config.api.application_id, alert_id=alert_id)
+        if not alerts:
             raise HTTPException(status_code=404, detail="Alert not found")
-        return alert
+        return alerts[0]
 
     @app.get("/v1/runs")
     async def list_runs(limit: int = Query(100, ge=1, le=1000), _: None = Depends(_auth)) -> list[dict[str, Any]]:
-        return await runtime.store.list_runs(limit=limit)
+        return await runtime.store.scoped_runs(runtime.config.api.application_id, limit=limit)
 
     @app.get("/v1/runs/{run_id}/events")
     async def run_events(
         run_id: str, limit: int = Query(500, ge=1, le=1000), _: None = Depends(_auth)
     ) -> list[dict[str, Any]]:
-        return await runtime.store.get_run_events(run_id=run_id, limit=limit)
+        return await runtime.store.scoped_run_events(runtime.config.api.application_id, run_id=run_id, limit=limit)
 
     @app.get("/v1/runs/{run_id}/alerts")
     async def run_alerts(
         run_id: str, limit: int = Query(200, ge=1, le=1000), _: None = Depends(_auth)
     ) -> list[dict[str, Any]]:
-        return await runtime.store.get_run_alerts(run_id=run_id, limit=limit)
+        return await runtime.store.scoped_alerts(runtime.config.api.application_id, run_id=run_id, limit=limit)
 
     @app.get("/v1/detectors")
     async def list_detectors(_: None = Depends(_auth)) -> dict[str, Any]:
@@ -113,11 +124,19 @@ def register_routes(app: FastAPI, runtime: Any, api_key: str | None = None) -> N
     @app.get("/", response_class=HTMLResponse)
     @app.get("/dashboard", response_class=HTMLResponse)
     async def dashboard(_: None = Depends(_auth)) -> str:
-        alerts = await runtime.store.list_alerts(limit=30)
-        runs = await runtime.store.list_runs(limit=30)
+        alerts = await runtime.store.scoped_alerts(runtime.config.api.application_id, limit=30)
+        runs = await runtime.store.scoped_runs(runtime.config.api.application_id, limit=30)
         workflows = await runtime.store.list_workflows(runtime.config.api.application_id)
         supervisor = getattr(runtime, "supervisor", None)
-        reviews = await supervisor.list_reviews() if supervisor else []
+        reviews = (
+            [
+                r
+                for r in await supervisor.list_reviews()
+                if r["action"]["application_id"] == runtime.config.api.application_id
+            ]
+            if supervisor
+            else []
+        )
         return render_dashboard(alerts, runs, workflows, reviews)
 
     from fisheye.api.oversight import register_oversight_routes
