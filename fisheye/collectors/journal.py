@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import hmac
 import json
+import secrets
 from datetime import datetime, timezone
 
 from fisheye.bus.async_bus import DeliveryReceipt, OverloadedError
@@ -54,23 +56,35 @@ class JournalStore(SQLiteStore):
                     id INTEGER PRIMARY KEY AUTOINCREMENT, item_key TEXT NOT NULL UNIQUE,
                     kind TEXT NOT NULL, data_json TEXT NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS journal_settings (key TEXT PRIMARY KEY, value BLOB NOT NULL);
                 PRAGMA user_version=2;
             """)
+            self._conn.commit()
+            self._conn.execute(
+                "INSERT OR IGNORE INTO journal_settings VALUES(?,?)", ("identity_key", secrets.token_bytes(32))
+            )
+            self._identity_key = self._conn.execute(
+                "SELECT value FROM journal_settings WHERE key='identity_key'"
+            ).fetchone()[0]
             self._conn.commit()
 
     def _commit(self):
         if not getattr(self, "_transaction", False):
             self._conn.commit()
 
-    async def accept(self, event: EventEnvelope) -> DeliveryReceipt:
-        return await asyncio.to_thread(self._accept, event)
+    async def accept(self, event: EventEnvelope, identity_event: EventEnvelope | None = None) -> DeliveryReceipt:
+        return await asyncio.to_thread(self._accept, event, identity_event)
 
-    def _accept(self, event):
+    def _accept(self, event, identity_event=None):
         data = event.model_dump(mode="json")
         # Arrival time and route metadata do not change producer identity.
-        canonical = dict(data)
+        canonical = (identity_event or event).model_dump(mode="json")
         canonical.pop("observed_at", None)
-        fingerprint = hashlib.sha256(json.dumps(canonical, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+        for key in ["_analysis", "features", "_route_mode"]:
+            canonical["meta"].pop(key, None)
+        fingerprint = hmac.new(
+            self._identity_key, json.dumps(canonical, sort_keys=True, separators=(",", ":")).encode(), hashlib.sha256
+        ).hexdigest()
         with self._lock:
             row = self._conn.execute(
                 "SELECT sequence,fingerprint FROM journal WHERE event_id=?", (event.event_id,)

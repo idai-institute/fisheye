@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import copy
 import hashlib
+import json
 from collections import defaultdict
 from dataclasses import dataclass
 
@@ -63,14 +64,20 @@ class AnalysisProcessor:
         return [d.detector_id for d in self.detectors]
 
     async def analyze(self, event, checkpoint=None):
+        if checkpoint and checkpoint.get("version") != 2:
+            raise ValueError("Unsupported analysis checkpoint version")
         state = decode(checkpoint["data"]) if checkpoint else {}
         contexts = state.setdefault("detectors", {})
+        versions = state.setdefault("plugin_versions", {})
         signals, errors = [], []
         scoped = event.model_copy(update={"run_id": event.scope})
         for detector in self.detectors:
             if detector.supported_event_types and event.event_type not in detector.supported_event_types:
                 continue
             spec = getattr(detector, "spec", PluginSpec(plugin_id=detector.detector_id))
+            if versions.get(detector.detector_id) != spec.version:
+                contexts.pop(detector.detector_id, None)
+                versions[detector.detector_id] = spec.version
             if event.schema_version not in spec.schema_versions or (
                 spec.requires_content and event.meta.get("feature_only")
             ):
@@ -79,11 +86,15 @@ class AnalysisProcessor:
             context = copy.deepcopy(contexts.get(detector.detector_id, {}))
             try:
                 signal = await asyncio.wait_for(detector.analyze(scoped, context), spec.timeout_seconds)
+                if len(json.dumps(encode(context), allow_nan=False).encode()) > spec.max_state_bytes:
+                    raise ValueError("Plugin checkpoint exceeds configured size")
                 contexts[detector.detector_id] = context
-                self.coverage[detector.detector_id] = "evaluated"
+                self.coverage[detector.detector_id] = signal.coverage if signal else "evaluated"
                 if signal:
                     signals.append(signal)
             except Exception as exc:
+                if budget_key := getattr(detector, "budget_context_key", None):
+                    contexts.setdefault(detector.detector_id, {})[budget_key] = context.get(budget_key, 0)
                 errors.append((detector.detector_id, type(exc).__name__))
                 self.coverage[detector.detector_id] = "error"
         grouped = defaultdict(list)

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from pathlib import Path
 from typing import Any, Coroutine
 
@@ -91,6 +92,7 @@ class FisheyeRuntime:
         self._export_task: asyncio.Task[None] | None = None
         self._export_error: str | None = None
         self._callback_errors: list[str] = []
+        self._last_maintenance = time.monotonic()
 
     def submit(self, coroutine: Coroutine[Any, Any, Any]) -> Any:
         try:
@@ -226,6 +228,9 @@ class FisheyeRuntime:
     async def _flush_periodically(self) -> None:
         while True:
             await asyncio.sleep(0.1)
+            if self.analysis is not None and time.monotonic() - self._last_maintenance > 60:
+                await self.store.prune(self.config.storage.retention_days, self.config.storage.state_ttl_seconds)
+                self._last_maintenance = time.monotonic()
             for mode, pipeline in self.preprocessor_pipelines.items():
                 for processor in pipeline.preprocessors:
                     if isinstance(processor, BufferingPreprocessor) and processor._should_flush():
@@ -280,12 +285,13 @@ class FisheyeRuntime:
         normalized = event if isinstance(event, EventEnvelope) else EventEnvelope.model_validate(event)
 
         if self.analysis is not None and isinstance(self.store, JournalStore):
+            identity_event = normalized
             normalized = capture_event(
                 normalized,
                 raw=self.config.storage.capture == "raw",
                 feature_only=self.config.storage.capture == "features",
             )
-            receipt = await self.store.accept(normalized)
+            receipt = await self.store.accept(normalized, identity_event=identity_event)
             self._wake.set()
             return receipt
 

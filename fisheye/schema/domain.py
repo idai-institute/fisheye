@@ -85,4 +85,5 @@ class PluginSpec(BaseModel):
     requires_content: bool = False
     timeout_seconds: float = Field(default=1, gt=0)
     state_ttl_seconds: int = Field(default=86400, gt=0)
+    max_state_bytes: int = Field(default=262144, gt=0)
     configuration: dict[str, Any] = Field(default_factory=dict)

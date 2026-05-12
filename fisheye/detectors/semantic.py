@@ -23,6 +23,7 @@ class JudgeProvider(Protocol):
 
 
 class SemanticDetector(Detector):
+    budget_context_key = "spent"
     supported_event_types = ("llm.request", "llm.message", "tool.call.end")
 
     def __init__(

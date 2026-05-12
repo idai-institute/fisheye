@@ -53,3 +53,21 @@ def test_projection_failure_rolls_back_checkpoint_and_event(tmp_path, monkeypatc
         store.close()
 
     asyncio.run(run())
+
+
+def test_redaction_cannot_hide_conflicting_secret_payload(tmp_path):
+    from fisheye.runtime import build_default_runtime
+    from fisheye.tests.test_privacy_and_auth import config
+
+    async def run():
+        async with build_default_runtime(config(tmp_path)) as runtime:
+            event = EventEnvelope(
+                event_type="llm.request", agent_id="a", run_id="r", payload={"password": "first-secret"}
+            )
+            await runtime.publish(event)
+            assert (await runtime.publish(event)).duplicate
+            changed = event.model_copy(update={"payload": {"password": "other-secret"}})
+            with pytest.raises(EventConflictError):
+                await runtime.publish(changed)
+
+    asyncio.run(run())
