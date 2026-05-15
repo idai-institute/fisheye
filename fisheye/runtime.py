@@ -185,11 +185,18 @@ class FisheyeRuntime:
             self._wake.clear()
             try:
                 pending = await self.store.pending()
+                states, results = {}, []
                 for sequence, event in pending:
-                    result = await self.analysis.analyze(event, await self.store.checkpoint(event.scope))
-                    await self.store.commit_analysis(
-                        sequence, event, result.state, result.alerts, result.findings, result.signals, result.errors
+                    if event.scope not in states:
+                        states[event.scope] = await self.store.checkpoint(event.scope)
+                    result = await self.analysis.analyze(event, states[event.scope])
+                    states[event.scope] = result.state
+                    results.append(
+                        (sequence, event, result.state, result.alerts, result.findings, result.signals, result.errors)
                     )
+                if results:
+                    await self.store.commit_analysis_batch(results)
+                for sequence, event in pending:
                     for mode in sorted(self._active_modes()):
                         for projected in await self.preprocessor_pipelines[mode].process(event.model_copy(deep=True)):
                             await self._publish_mode(projected, mode)
@@ -204,20 +211,12 @@ class FisheyeRuntime:
             await self._wake.wait()
 
     async def _export_journal(self) -> None:
-        import json
-
-        from fisheye.schema.alerts import Alert
-
         while True:
             try:
                 items = await self.store.pending_exports()
-                for item in items:
-                    data = json.loads(item["data_json"])
-                    if item["kind"] == "event":
-                        await self.logger.handle_event(EventEnvelope.model_validate(data))
-                    else:
-                        await self.logger.handle_alert(Alert.model_validate(data))
-                    await self.store.acknowledge_export(item["id"])
+                if items:
+                    await self.logger.handle_batch(items)
+                    await self.store.acknowledge_exports([item["id"] for item in items])
                 self._export_error = None
                 if items:
                     continue
@@ -309,9 +308,24 @@ class FisheyeRuntime:
                 dropped += receipt.dropped
         return DeliveryReceipt(normalized.event_id, delivered, dropped)
 
-    async def ingest(self, events: list[EventEnvelope | dict[str, Any]]) -> None:
-        for event in events:
-            await self.publish(event)
+    async def ingest(self, events: list[EventEnvelope | dict[str, Any]]) -> list[DeliveryReceipt]:
+        """Validate and accept a batch atomically on the durable runtime."""
+        if not self._started:
+            await self.start()
+        if self.analysis is None or not isinstance(self.store, JournalStore):
+            return [await self.publish(event) for event in events]
+        originals = [
+            event if isinstance(event, EventEnvelope) else EventEnvelope.model_validate(event) for event in events
+        ]
+        captured = [
+            capture_event(
+                event, raw=self.config.storage.capture == "raw", feature_only=self.config.storage.capture == "features"
+            )
+            for event in originals
+        ]
+        receipts = await self.store.accept_many(captured, originals)
+        self._wake.set()
+        return receipts
 
     async def drain(self, timeout: float | None = None) -> None:
         if self._callback_errors:

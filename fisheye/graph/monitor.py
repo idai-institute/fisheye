@@ -23,7 +23,7 @@ class WorkflowGraph:
             kind=event.event_type,
             timestamp=event.timestamp.isoformat(),
             parents=parents,
-            payload=p,
+            payload=self.summary(p),
             analysis=event.meta.get("_analysis", {}),
         )
         if len(nodes) > self.max_events:
@@ -183,13 +183,12 @@ class WorkflowGraph:
                 outbound = sink["kind"] in {"network.request", "file.write", "artifact.transferred"} or bool(
                     sp.get("destination") or sp.get("url")
                 )
-                signature = None
+                signatures = []
                 if injection and (tool in {"shell", "http", "upload", "send", "file_write", "python_exec"} or outbound):
-                    signature = ("injection_propagation", source_id)
+                    signatures.append(("injection_propagation", source_id))
                 if sensitive and outbound and not sp.get("authorized", False):
-                    signature = ("data_movement", source_id)
-                if signature:
-                    category, key = signature
+                    signatures.append(("data_movement", source_id))
+                for category, key in signatures:
                     dedup = category + ":" + source_id + ":" + sink["id"]
                     if dedup not in emitted:
                         emit(
@@ -220,6 +219,16 @@ class WorkflowGraph:
             for key in list(emitted)[: len(emitted) - self.max_events * 2]:
                 del emitted[key]
         return findings
+
+    @staticmethod
+    def summary(payload):
+        """Bound graph duplication; the journal retains the complete captured payload."""
+        structural = {"trust", "quoted", "classification", "tool_name", "destination", "url", "authorized"}
+        result = {key: value for key, value in payload.items() if key in structural}
+        for key in ("content", "input", "output", "text"):
+            if isinstance(payload.get(key), str):
+                result[key] = payload[key][:256]
+        return result
 
     @staticmethod
     def ancestors(nodes, event_id):

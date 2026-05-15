@@ -8,17 +8,17 @@ def test_export_backlog_survives_sink_failure(tmp_path):
     async def run():
         cfg = config(tmp_path)
         runtime = build_default_runtime(cfg)
-        original = runtime.logger.handle_event
+        original = runtime.logger.handle_batch
 
         async def broken(event):
             raise OSError("unavailable")
 
-        runtime.logger.handle_event = broken
+        runtime.logger.handle_batch = broken
         await runtime.publish(dict(event_type="agent.start", agent_id="a", run_id="r"))
         await asyncio.sleep(0.1)
         assert len(await runtime.store.pending_exports()) == 1
         assert (await runtime.store.journal_metrics())["pending"] == 0
-        runtime.logger.handle_event = original
+        runtime.logger.handle_batch = original
         runtime._export_error = None
         await runtime.drain(5)
         await runtime.aclose()

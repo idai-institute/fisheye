@@ -71,3 +71,40 @@ def test_redaction_cannot_hide_conflicting_secret_payload(tmp_path):
                 await runtime.publish(changed)
 
     asyncio.run(run())
+
+
+def test_atomic_batches_and_concurrent_producer_connections(tmp_path):
+    async def run():
+        store = JournalStore(tmp_path / "batch.db")
+        other = JournalStore(tmp_path / "batch.db")
+        event = EventEnvelope(event_type="agent.start", agent_id="a", run_id="r")
+        receipts = await asyncio.gather(store.accept(event), other.accept(event))
+        assert sum(receipt.duplicate for receipt in receipts) == 1
+        fresh = event.model_copy(update={"event_id": "new"})
+        conflict = event.model_copy(update={"payload": {"conflict": True}})
+        with pytest.raises(EventConflictError):
+            await store.accept_many([fresh, conflict])
+        assert len(await store.pending()) == 1
+        await store.accept_many([fresh])
+        items = [(seq, ev, {"last": ev.event_id}, (), (), (), ()) for seq, ev in await store.pending()]
+        original = store._insert_event
+
+        def fail_second(ev):
+            original(ev)
+            if ev.event_id == "new":
+                raise RuntimeError("fault after first projection")
+
+        store._insert_event = fail_second
+        with pytest.raises(RuntimeError):
+            await store.commit_analysis_batch(items)
+        assert len(await store.pending()) == 2
+        assert await store.list_runs() == []
+        assert await store.pending_exports() == []
+        store._insert_event = original
+        await store.commit_analysis_batch(items)
+        assert await store.checkpoint(event.scope) == {"last": "new"}
+        assert (await store.list_runs())[0]["event_count"] == 2
+        store.close()
+        other.close()
+
+    asyncio.run(run())

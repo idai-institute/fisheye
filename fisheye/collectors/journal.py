@@ -73,7 +73,30 @@ class JournalStore(SQLiteStore):
             self._conn.commit()
 
     async def accept(self, event: EventEnvelope, identity_event: EventEnvelope | None = None) -> DeliveryReceipt:
-        return await asyncio.to_thread(self._accept, event, identity_event)
+        return (await self.accept_many([event], [identity_event or event]))[0]
+
+    async def accept_many(self, events, identity_events=None):
+        """Accept a validated batch atomically, including backlog and identity checks."""
+        events = list(events)
+        identities = list(identity_events) if identity_events is not None else events
+        if len(events) != len(identities):
+            raise ValueError("Identity count must match event count")
+
+        def accept_batch():
+            with self._lock:
+                self._conn.execute("BEGIN IMMEDIATE")
+                self._transaction = True
+                try:
+                    receipts = [self._accept(event, identity) for event, identity in zip(events, identities)]
+                    self._conn.commit()
+                    return receipts
+                except BaseException:
+                    self._conn.rollback()
+                    raise
+                finally:
+                    self._transaction = False
+
+        return await asyncio.to_thread(accept_batch)
 
     def _accept(self, event, identity_event=None):
         data = event.model_dump(mode="json")
@@ -100,7 +123,7 @@ class JournalStore(SQLiteStore):
                 "INSERT INTO journal(event_id,scope,fingerprint,event_json,accepted_at) VALUES(?,?,?,?,?)",
                 (event.event_id, event.scope, fingerprint, self._json(data), datetime.now(timezone.utc).isoformat()),
             )
-            self._conn.commit()
+            self._commit()
             return DeliveryReceipt(event.event_id, 0, durable=True, sequence=cursor.lastrowid)
 
     async def pending(self, limit=100):
@@ -114,16 +137,33 @@ class JournalStore(SQLiteStore):
         return json.loads(rows[0]["state_json"]) if rows else None
 
     async def commit_analysis(self, sequence, event, state, alerts=(), findings=(), signals=(), errors=()):
-        await asyncio.to_thread(self._commit_analysis, sequence, event, state, alerts, findings, signals, errors)
+        await self.commit_analysis_batch([(sequence, event, state, alerts, findings, signals, errors)])
 
-    def _commit_analysis(self, sequence, event, state, alerts, findings, signals, errors):
+    async def commit_analysis_batch(self, items):
+        items = list(items)
+
+        def commit_batch():
+            with self._lock:
+                self._conn.execute("BEGIN IMMEDIATE")
+                self._transaction = True
+                try:
+                    last = {item[1].scope: index for index, item in enumerate(items)}
+                    for index, item in enumerate(items):
+                        self._commit_analysis(*item, save_checkpoint=last[item[1].scope] == index)
+                    self._conn.commit()
+                except BaseException:
+                    self._conn.rollback()
+                    raise
+                finally:
+                    self._transaction = False
+
+        await asyncio.to_thread(commit_batch)
+
+    def _commit_analysis(self, sequence, event, state, alerts, findings, signals, errors, save_checkpoint=True):
         with self._lock:
-            self._conn.execute("BEGIN IMMEDIATE")
-            self._transaction = True
             try:
                 row = self._conn.execute("SELECT processed FROM journal WHERE sequence=?", (sequence,)).fetchone()
                 if row is None or row["processed"]:
-                    self._conn.rollback()
                     return
                 self._insert_event(event)
                 self._conn.execute(
@@ -145,7 +185,12 @@ class JournalStore(SQLiteStore):
                     if old:
                         previous = json.loads(old["data_json"])
                         finding.status = old["status"]
-                        finding.first_seen = datetime.fromisoformat(previous["first_seen"].replace("Z", "+00:00"))
+                        finding.first_seen = min(
+                            finding.first_seen, datetime.fromisoformat(previous["first_seen"].replace("Z", "+00:00"))
+                        )
+                        finding.last_seen = max(
+                            finding.last_seen, datetime.fromisoformat(previous["last_seen"].replace("Z", "+00:00"))
+                        )
                         finding.event_ids = sorted(set(finding.event_ids + previous["event_ids"]))[-200:]
                         finding.occurrences = previous.get("occurrences", 1) + 1
                     self._conn.execute(
@@ -164,17 +209,16 @@ class JournalStore(SQLiteStore):
                         "INSERT INTO dead_letters(sequence,plugin,error_type,timestamp) VALUES(?,?,?,?)",
                         (sequence, plugin, error_type, event.observed_at.isoformat()),
                     )
-                self._conn.execute(
-                    "INSERT OR REPLACE INTO checkpoints VALUES(?,?,?,?)",
-                    (event.scope, sequence, self._json(state), event.observed_at.isoformat()),
-                )
+                if save_checkpoint:
+                    self._conn.execute(
+                        "INSERT OR REPLACE INTO checkpoints VALUES(?,?,?,?)",
+                        (event.scope, sequence, self._json(state), event.observed_at.isoformat()),
+                    )
                 self._conn.execute("UPDATE journal SET processed=1 WHERE sequence=?", (sequence,))
-                self._conn.commit()
+                self._commit()
             except BaseException:
                 self._conn.rollback()
                 raise
-            finally:
-                self._transaction = False
 
     async def journal_events(self, scope=None, after=0, limit=1000):
         where, args = "sequence>?", [after]
@@ -234,10 +278,10 @@ class JournalStore(SQLiteStore):
         def read():
             with self._lock:
                 row = self._conn.execute(
-                    "SELECT COUNT(*) total, SUM(processed=0) pending, MIN(CASE WHEN processed=0 THEN accepted_at END) oldest FROM journal"
+                    "SELECT COUNT(*) pending, MIN(accepted_at) oldest FROM journal WHERE processed=0"
                 ).fetchone()
                 return dict(
-                    accepted=row["total"],
+                    accepted=self._conn.execute("SELECT COUNT(*) FROM journal").fetchone()[0],
                     pending=row["pending"] or 0,
                     oldest_pending=row["oldest"],
                     dead_letters=self._conn.execute("SELECT COUNT(*) FROM dead_letters").fetchone()[0],
@@ -323,9 +367,12 @@ class JournalStore(SQLiteStore):
         ]
 
     async def acknowledge_export(self, item_id):
+        await self.acknowledge_exports([item_id])
+
+    async def acknowledge_exports(self, item_ids):
         def ack():
             with self._lock, self._conn:
-                self._conn.execute("DELETE FROM export_outbox WHERE id=?", (item_id,))
+                self._conn.executemany("DELETE FROM export_outbox WHERE id=?", [(item_id,) for item_id in item_ids])
 
         await asyncio.to_thread(ack)
 
