@@ -35,6 +35,9 @@ class SQLiteStore(Collector, AlertSink):
         self._lock = threading.RLock()
         self._conn = sqlite3.connect(self.db_path, check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
+        if self._conn.execute("PRAGMA user_version").fetchone()[0] > 2:
+            self._conn.close()
+            raise ValueError("Database schema is newer than this library")
         self._init_schema()
 
     def close(self) -> None:

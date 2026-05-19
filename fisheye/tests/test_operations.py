@@ -22,7 +22,12 @@ def test_migration_keeps_source_untouched_and_has_dry_run(tmp_path):
     async def run():
         source = tmp_path / "old.db"
         old = SQLiteStore(source)
-        await old.handle_event(EventEnvelope(event_type="agent.start", agent_id="a", run_id="old-run"))
+        old.raw_capture = True
+        await old.handle_event(
+            EventEnvelope(
+                event_type="agent.start", agent_id="a", run_id="old-run", payload={"password": "legacy-secret"}
+            )
+        )
         old.close()
         before = source.read_bytes()
         assert (await migrate(source))["events"] == 1
@@ -32,7 +37,36 @@ def test_migration_keeps_source_untouched_and_has_dry_run(tmp_path):
         store = JournalStore(dest)
         assert len(await store.pending()) == 1
         assert (await store.pending())[0][1].workflow == "old-run"
+        assert "legacy-secret" not in str(await store.get_run_events("old-run"))
         store.close()
+
+    asyncio.run(run())
+
+
+def test_v2_migration_preserves_scope_and_rejects_future_schema(tmp_path):
+    import sqlite3
+
+    import pytest
+
+    async def run():
+        source = tmp_path / "v2.db"
+        store = JournalStore(source)
+        event = EventEnvelope(
+            event_type="agent.start", agent_id="a", run_id="r", application_id="team", workflow_id="w"
+        )
+        await store.accept(event)
+        store.close()
+        await migrate(source, tmp_path / "copy.db", False)
+        copied = JournalStore(tmp_path / "copy.db")
+        assert (await copied.pending())[0][1].scope == event.scope
+        assert (await copied.accept(event)).duplicate
+        copied.close()
+        with sqlite3.connect(source) as conn:
+            conn.execute("PRAGMA user_version=99")
+        with pytest.raises(ValueError, match="newer"):
+            await migrate(source)
+        with pytest.raises(ValueError, match="newer"):
+            JournalStore(source)
 
     asyncio.run(run())
 

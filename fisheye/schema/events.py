@@ -98,7 +98,7 @@ class EventEnvelope(BaseModel):
             "task.status": TaskStatus,
             "usage.recorded": Usage,
         }
-        if self.schema_version == "2" and self.event_type in models:
+        if self.event_type in models:
             self.payload = models[self.event_type].model_validate(self.payload).model_dump(mode="json")
         try:
             json.dumps([self.payload, self.meta, self.tags], allow_nan=False)

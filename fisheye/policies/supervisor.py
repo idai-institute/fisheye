@@ -60,6 +60,14 @@ class Supervisor:
             and row["calls"] + 1 <= self.policy.max_calls
         )
 
+    def _active_findings(self, scope):
+        return [
+            json.loads(row[0])
+            for row in self.store._conn.execute(
+                "SELECT data_json FROM findings WHERE scope=? AND status IN ('open','acknowledged')", (scope,)
+            )
+        ]
+
     @staticmethod
     def _decision(row):
         return Decision(
@@ -173,7 +181,11 @@ class Supervisor:
                     ):
                         raise ActionDenied("Review is stale, expired, or action has changed")
                     action = Action.model_validate_json(row["action_json"])
-                    allowed = approve and self.policy.evaluate(action)[0] != "deny" and self._budget_available(action)
+                    allowed = (
+                        approve
+                        and self.policy.evaluate(action, self._active_findings(action.scope))[0] != "deny"
+                        and self._budget_available(action)
+                    )
                     conn.execute(
                         "UPDATE actions SET decision=?,status=?,reason=?,reviewer=? WHERE action_id=?",
                         (
@@ -201,11 +213,13 @@ class Supervisor:
 
         def claim():
             with self.store._lock, self.store._conn:
+                self.store._conn.execute("BEGIN IMMEDIATE")
                 self._expire()
                 row = self.store._conn.execute(
                     "SELECT * FROM actions WHERE action_id=?", (action.action_id,)
                 ).fetchone()
                 if row and row["status"] == "pending":
+                    self.store._conn.commit()
                     raise ReviewRequired(action.action_id)
                 if (
                     not row
@@ -213,7 +227,20 @@ class Supervisor:
                     or row["digest"] != action.digest
                     or row["policy_version"] != self.policy.version
                 ):
+                    self.store._conn.commit()
                     raise ActionDenied("Action is denied, expired, changed, or already consumed")
+                if self.policy.evaluate(action, self._active_findings(action.scope))[
+                    0
+                ] == "deny" or not self._budget_available(action, exclude=action.action_id):
+                    self.store._conn.execute(
+                        "UPDATE actions SET status='denied',decision='deny',reason='execution_recheck' WHERE action_id=?",
+                        (action.action_id,),
+                    )
+                    self._audit(
+                        action.agent_id, "action.denied", dict(action_id=action.action_id, reason="execution_recheck")
+                    )
+                    self.store._conn.commit()
+                    raise ActionDenied("Current findings or budget block execution")
                 self.store._conn.execute("UPDATE actions SET status='executing' WHERE action_id=?", (action.action_id,))
                 self._audit(action.agent_id, "action.executing", dict(action_id=action.action_id))
 
@@ -264,9 +291,43 @@ class Supervisor:
             )
 
     async def list_reviews(self, status="pending", limit=100):
+        def expire():
+            with self.store._lock, self.store._conn:
+                self._expire()
+
+        await asyncio.to_thread(expire)
         rows = await asyncio.to_thread(
             self.store._query, "SELECT * FROM actions WHERE status=? ORDER BY created_at LIMIT ?", (status, limit)
         )
         return [
             dict(self._decision(row).model_dump(mode="json"), action=json.loads(row["action_json"])) for row in rows
         ]
+
+    async def record_usage(self, action_id: str, *, cost: float, tokens: int):
+        """Reconcile a terminal action using usage measured by the trusted host."""
+        from fisheye.schema.domain import Usage
+
+        usage = Usage(cost=cost, tokens=tokens)
+
+        def record():
+            with self.store._lock, self.store._conn:
+                self.store._conn.execute("BEGIN IMMEDIATE")
+                row = self.store._conn.execute("SELECT * FROM actions WHERE action_id=?", (action_id,)).fetchone()
+                if row is None or row["status"] not in {"completed", "failed", "unknown"}:
+                    raise ActionDenied("Usage requires a terminal action")
+                self.store._conn.execute(
+                    "UPDATE actions SET reserved_cost=?,reserved_tokens=? WHERE action_id=?",
+                    (usage.cost, usage.tokens, action_id),
+                )
+                self._audit("host", "action.usage", dict(action_id=action_id, cost=usage.cost, tokens=usage.tokens))
+                totals = self.store._conn.execute(
+                    "SELECT SUM(reserved_cost) cost,SUM(reserved_tokens) tokens FROM actions WHERE scope=? AND status IN ('approved','executing','completed','failed','unknown')",
+                    (row["scope"],),
+                ).fetchone()
+                return dict(
+                    cost=totals["cost"],
+                    tokens=totals["tokens"],
+                    exceeded=totals["cost"] > self.policy.max_cost or totals["tokens"] > self.policy.max_tokens,
+                )
+
+        return await asyncio.to_thread(record)

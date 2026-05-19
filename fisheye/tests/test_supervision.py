@@ -78,3 +78,50 @@ def test_destination_matching_is_exact_and_sensitive_egress_denied():
     for url in ["https://trusted.example.evil.test", "https://trusted.example@evil.test", "file:///tmp/exfil"]:
         assert policy.evaluate(action(destination=url))[0] == "deny"
     assert policy.evaluate(action(destination="https://trusted.example", classification="secret"))[0] == "deny"
+
+
+def test_two_connections_cannot_execute_same_approval_and_usage_reconciles(tmp_path):
+    async def run():
+        path = tmp_path / "concurrent.db"
+        stores = [JournalStore(path), JournalStore(path)]
+        calls = []
+        policy = Policy(max_cost=10)
+        supervisors = [Supervisor(store, policy, {"send": lambda: calls.append(True)}) for store in stores]
+        a = action(estimated_cost=3)
+        await supervisors[0].propose(a)
+        results = await asyncio.gather(*(s.execute(a) for s in supervisors), return_exceptions=True)
+        assert sum(isinstance(result, ActionDenied) for result in results) == 1
+        assert calls == [True]
+        usage = await supervisors[0].record_usage(a.action_id, cost=11, tokens=4)
+        assert usage["exceeded"]
+        assert (await supervisors[1].propose(action(estimated_cost=1))).decision == "deny"
+        for store in stores:
+            store.close()
+
+    asyncio.run(run())
+
+
+def test_new_finding_invalidates_previously_approved_action(tmp_path):
+    from fisheye.schema.domain import Finding
+    from fisheye.schema.events import EventEnvelope
+
+    async def run():
+        store = JournalStore(tmp_path / "finding.db")
+        calls = []
+        supervisor = Supervisor(
+            store, Policy(blocked_finding_categories={"coordination"}), {"send": lambda: calls.append(True)}
+        )
+        a = action()
+        await supervisor.propose(a)
+        event = EventEnvelope(event_type="agent.start", agent_id="a", run_id="w")
+        receipt = await store.accept(event)
+        finding = Finding(
+            finding_id="new-finding", workflow_id="w", category="coordination", score=0.9, title="New issue"
+        )
+        await store.commit_analysis(receipt.sequence, event, {}, findings=[finding])
+        with pytest.raises(ActionDenied):
+            await supervisor.execute(a)
+        assert calls == []
+        store.close()
+
+    asyncio.run(run())
