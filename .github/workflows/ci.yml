@@ -22,7 +22,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        integration: [langchain, openai-agents, camel]
+        integration: [langchain, openai-agents, camel, telemetry]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

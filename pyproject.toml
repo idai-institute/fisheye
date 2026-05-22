@@ -15,7 +15,7 @@ server = ["fastapi>=0.115,<0.116", "starlette>=0.40,<0.47", "uvicorn>=0.30,<1", 
 langchain = ["langchain-core==0.3.63"]
 openai-agents = ["openai-agents==0.0.17", "openai==1.82.0"]
 camel = ["camel-ai==0.2.58", "openai==1.82.0", "numpy>=1.26,<3", "pillow>=11,<12", "jsonschema>=4.23,<5", "requests-oauthlib>=2,<3", "sqlalchemy>=2,<3", "pandas>=2.2,<3", "beautifulsoup4>=4.13,<5"]
-telemetry = ["opentelemetry-api>=1.30,<2"]
+telemetry = ["opentelemetry-api==1.33.1", "opentelemetry-sdk==1.33.1"]
 dev = ["pytest>=8,<9", "httpx>=0.27,<1", "build>=1.2,<2", "ruff==0.11.13", "fastapi>=0.115,<0.116", "starlette>=0.40,<0.47", "jinja2>=3.1.6,<4", "uvicorn>=0.30,<1"]
 
 [project.scripts]

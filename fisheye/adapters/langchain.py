@@ -61,7 +61,9 @@ class LangChainCallbackHandler(BaseCallbackHandler):
         if kind in {"tool.call.start", "llm.request"}:
             self._starts[native] = event_id
         elif native in self._starts:
-            links = [self._starts.pop(native)]
+            links = [self._starts[native]]
+            if kind in {"tool.call.end", "tool.call.error", "llm.response", "agent.error"}:
+                self._starts.pop(native)
         payload = json_safe(dict(payload, native_run_id=native))
         self.adapter.dispatch(
             self.adapter.emit(

@@ -1,8 +1,6 @@
 from __future__ import annotations
 
-import time
 from collections.abc import Callable
-from functools import wraps
 from typing import Any
 
 from fisheye.adapters.base import AdapterBase
@@ -10,7 +8,14 @@ from fisheye.adapters.base import AdapterBase
 
 class OpenAIAgentsAdapter(AdapterBase):
     framework = "openai_agents"
-    capabilities = {"observe": True, "native_hooks": True, "pre_action": False, "pause_resume": False}
+    capabilities = {
+        "observe": True,
+        "native_hooks": True,
+        "pre_action": False,
+        "pause_resume": False,
+        "native_tool_call_ids": False,
+        "streaming_deltas": False,
+    }
 
     def as_run_hooks(self):
         return native_run_hooks(self)
@@ -37,20 +42,9 @@ class OpenAIAgentsAdapter(AdapterBase):
         await self.emit("tool.call.end", payload)
 
     def wrap_tool(self, tool_name: str, func: Callable[..., Any]) -> Callable[..., Any]:
-        @wraps(func)
-        async def wrapper(*args: Any, **kwargs: Any) -> Any:
-            await self.on_tool_call(tool_name, {"args": args, "kwargs": kwargs})
-            started_at = time.perf_counter()
-            try:
-                result = await self._run_callable(func, *args, **kwargs)
-            except Exception as exc:
-                await self.emit("tool.call.error", {"tool_name": tool_name, "error": str(exc)})
-                raise
-            latency_ms = (time.perf_counter() - started_at) * 1000.0
-            await self.on_tool_result(tool_name, result, latency_ms=latency_ms)
-            return result
+        from fisheye.adapters.generic import GenericAdapter
 
-        return wrapper
+        return GenericAdapter.wrap_tool(self, tool_name, func)
 
     def as_event_hook(self) -> "OpenAIAgentsEventHook":
         return OpenAIAgentsEventHook(self)
@@ -95,14 +89,11 @@ class OpenAIAgentsEventHook:
 
 def native_run_hooks(adapter):
     """Return real RunHooks; install fisheye[openai-agents] to use this bridge."""
-    from contextvars import ContextVar
     from uuid import uuid4
 
     from agents import RunHooks
 
     from fisheye.adapters.serialization import json_safe
-
-    call = ContextVar("fisheye_openai_call", default=None)
 
     class Hooks(RunHooks):
         async def emit_for(self, agent, kind, payload, **kwargs):
@@ -132,21 +123,19 @@ def native_run_hooks(adapter):
             await self.emit_for(from_agent, "task.delegated", dict(task_id=uuid4().hex, recipient_id=to_agent.name))
 
         async def on_tool_start(self, context, agent, tool):
-            first = await self.emit_for(agent, "tool.call.start", dict(tool_name=tool.name))
-            call.set((first.event_id, time.perf_counter()))
+            await self.emit_for(
+                agent, "tool.call.start", dict(tool_name=tool.name, correlation="unavailable_in_native_hook")
+            )
 
         async def on_tool_end(self, context, agent, tool, result):
-            previous = call.get()
             await self.emit_for(
                 agent,
                 "tool.call.end",
                 dict(
                     tool_name=tool.name,
                     output=result,
-                    latency_ms=(time.perf_counter() - previous[1]) * 1000 if previous else None,
+                    correlation="unavailable_in_native_hook",
                 ),
-                links=[previous[0]] if previous else [],
             )
-            call.set(None)
 
     return Hooks()

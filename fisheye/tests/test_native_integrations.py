@@ -139,3 +139,62 @@ def test_camel_native_stub_agent_and_function_tool(tmp_path):
             }
 
     asyncio.run(run())
+
+
+def test_langchain_native_stream_keeps_request_link_until_completion(tmp_path):
+    pytest.importorskip("langchain_core")
+    from langchain_core.language_models.fake_chat_models import FakeListChatModel
+
+    from fisheye.adapters.langchain import LangChainAdapter
+
+    async def run():
+        async with build_default_runtime(config(tmp_path)) as runtime:
+            handler = LangChainAdapter(runtime, "streamer", "r").as_callback_handler()
+            chunks = [
+                chunk
+                async for chunk in FakeListChatModel(responses=["hello"]).astream(
+                    "hello", config={"callbacks": [handler]}
+                )
+            ]
+            assert len(chunks) == 5
+            await runtime.drain(5)
+            events = [row["event"] for row in await runtime.store.journal_events()]
+            request = next(e for e in events if e["event_type"] == "llm.request")
+            linked = [e for e in events if e["event_type"] in {"custom.llm.delta", "llm.response"}]
+            assert len(linked) == 6 and all(e["links"] == [request["event_id"]] for e in linked)
+            assert handler._starts == {}
+
+    asyncio.run(run())
+
+
+def test_native_telemetry_parent_and_span_links(tmp_path):
+    pytest.importorskip("opentelemetry.sdk")
+    from opentelemetry.sdk.trace import TracerProvider
+    from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+    from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
+    from opentelemetry.trace import Link
+
+    from fisheye.adapters.opentelemetry import OpenTelemetryAdapter
+
+    provider = TracerProvider()
+    exporter = InMemorySpanExporter()
+    provider.add_span_processor(SimpleSpanProcessor(exporter))
+    tracer = provider.get_tracer("fisheye-test")
+    with tracer.start_as_current_span("parent") as parent:
+        with tracer.start_as_current_span("tool", links=[Link(parent.get_span_context())]) as span:
+            span.set_attribute("gen_ai.tool.name", "read_document")
+
+    async def run():
+        async with build_default_runtime(config(tmp_path)) as runtime:
+            adapter = OpenTelemetryAdapter(runtime)
+            for span in exporter.get_finished_spans():
+                await adapter.record_span(span, "w", "a")
+            await runtime.drain(5)
+            events = [row["event"] for row in await runtime.store.journal_events()]
+            child = next(e for e in events if e["event_type"] == "tool.call.end")
+            root = next(e for e in events if e["event_type"] == "llm.response")
+            assert child["parent_span_id"] == root["span_id"]
+            assert root["event_id"] in child["links"]
+
+    asyncio.run(run())
+    provider.shutdown()

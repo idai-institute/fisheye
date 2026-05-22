@@ -44,6 +44,8 @@ class OpenTelemetryAdapter:
                 trace_id=f"{context.trace_id:032x}",
                 span_id=f"{context.span_id:016x}",
                 parent_span_id=f"{span.parent.span_id:016x}" if span.parent else None,
+                links=([f"otel-{span.parent.trace_id:032x}-{span.parent.span_id:016x}"] if span.parent else [])
+                + [f"otel-{link.context.trace_id:032x}-{link.context.span_id:016x}" for link in span.links],
                 timestamp=datetime.fromtimestamp(span.end_time / 1e9, timezone.utc)
                 if span.end_time
                 else datetime.now(timezone.utc),
