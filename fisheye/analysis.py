@@ -67,7 +67,8 @@ class AnalysisProcessor:
         if checkpoint and checkpoint.get("version") != 2:
             raise ValueError("Unsupported analysis checkpoint version")
         state = decode(checkpoint["data"]) if checkpoint else {}
-        contexts = state.setdefault("detectors", {})
+        legacy_contexts = state.pop("detectors", {})
+        contexts = state.setdefault("plugin_contexts", {})
         versions = state.setdefault("plugin_versions", {})
         signals, errors = [], []
         scoped = event.model_copy(update={"run_id": event.scope})
@@ -75,6 +76,8 @@ class AnalysisProcessor:
             if detector.supported_event_types and event.event_type not in detector.supported_event_types:
                 continue
             spec = getattr(detector, "spec", PluginSpec(plugin_id=detector.detector_id))
+            if spec.event_types and event.event_type not in spec.event_types:
+                continue
             if versions.get(detector.detector_id) != spec.version:
                 contexts.pop(detector.detector_id, None)
                 versions[detector.detector_id] = spec.version
@@ -83,18 +86,32 @@ class AnalysisProcessor:
             ):
                 self.coverage[detector.detector_id] = "insufficient_input"
                 continue
-            context = copy.deepcopy(contexts.get(detector.detector_id, {}))
+            bucket = contexts.setdefault(detector.detector_id, {})
+            now = event.observed_at.timestamp()
+            for key in list(bucket):
+                if now - bucket[key]["updated"] > spec.state_ttl_seconds:
+                    del bucket[key]
+            scope_key = (
+                json.dumps([event.agent_id, event.agent_version, event.agent_instance_id])
+                if spec.scope == "agent"
+                else "workflow"
+            )
+            previous = bucket.get(scope_key, {}).get("state", legacy_contexts.get(detector.detector_id, {}))
+            context = copy.deepcopy(previous)
             try:
                 signal = await asyncio.wait_for(detector.analyze(scoped, context), spec.timeout_seconds)
-                if len(json.dumps(encode(context), allow_nan=False).encode()) > spec.max_state_bytes:
+                updated = dict(bucket, **{scope_key: {"state": context, "updated": now}})
+                if len(json.dumps(encode(updated), allow_nan=False).encode()) > spec.max_state_bytes:
                     raise ValueError("Plugin checkpoint exceeds configured size")
-                contexts[detector.detector_id] = context
+                contexts[detector.detector_id] = updated
                 self.coverage[detector.detector_id] = signal.coverage if signal else "evaluated"
                 if signal:
                     signals.append(signal)
             except Exception as exc:
                 if budget_key := getattr(detector, "budget_context_key", None):
-                    contexts.setdefault(detector.detector_id, {})[budget_key] = context.get(budget_key, 0)
+                    fallback = copy.deepcopy(previous)
+                    fallback[budget_key] = context.get(budget_key, 0)
+                    bucket[scope_key] = {"state": fallback, "updated": now}
                 errors.append((detector.detector_id, type(exc).__name__))
                 self.coverage[detector.detector_id] = "error"
         grouped = defaultdict(list)

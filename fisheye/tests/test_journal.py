@@ -108,3 +108,40 @@ def test_atomic_batches_and_concurrent_producer_connections(tmp_path):
         other.close()
 
     asyncio.run(run())
+
+
+def test_process_death_during_projection_recovers_accepted_event(tmp_path):
+    import subprocess
+    import sys
+
+    from fisheye.runtime import build_default_runtime
+    from fisheye.tests.test_privacy_and_auth import config
+
+    cfg = config(tmp_path)
+    child = """
+import asyncio, os, sys
+from fisheye.collectors.journal import JournalStore
+from fisheye.schema.events import EventEnvelope
+async def run():
+    store = JournalStore(sys.argv[1])
+    event = EventEnvelope(event_id="crash-event", event_type="agent.start", agent_id="a", run_id="r")
+    receipt = await store.accept(event)
+    insert = store._insert_event
+    def crash(ev):
+        insert(ev)
+        os._exit(23)
+    store._insert_event = crash
+    await store.commit_analysis(receipt.sequence, event, {})
+asyncio.run(run())
+"""
+    result = subprocess.run([sys.executable, "-c", child, str(cfg.storage.sqlite_path)], timeout=10)
+    assert result.returncode == 23
+
+    async def run():
+        async with build_default_runtime(cfg) as runtime:
+            await runtime.drain(5)
+            assert (await runtime.store.journal_metrics())["pending"] == 0
+            assert (await runtime.store.list_runs())[0]["event_count"] == 1
+            assert len(await runtime.store.journal_events()) == 1
+
+    asyncio.run(run())

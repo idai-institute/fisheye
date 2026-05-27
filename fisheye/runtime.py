@@ -431,6 +431,25 @@ def build_default_runtime(config: FisheyeConfig | None = None) -> FisheyeRuntime
         config.storage.alerts_jsonl_path,
         redact_content=config.storage.capture != "raw",
     )
+    analysis = build_analysis(config)
+    runtime = FisheyeRuntime(
+        bus=AsyncEventBus(queue_size=config.bus.queue_size, default_retries=config.bus.retry_attempts, overflow="drop"),
+        preprocessor_pipelines={
+            "raw": _build_preprocessor_pipeline(config, include_redaction=False, feature_only=False),
+            "redacted": _build_preprocessor_pipeline(config, include_redaction=True, feature_only=False),
+            "feature_only": _build_preprocessor_pipeline(config, include_redaction=True, feature_only=True),
+        },
+        store=store,
+    )
+    runtime.analysis = analysis
+    runtime.detector_engine = analysis
+    runtime.logger = logger
+    runtime.config = config
+    return runtime
+
+
+def build_analysis(config: FisheyeConfig) -> AnalysisProcessor:
+    """Use identical configured monitors for live analysis and offline replay."""
     analysis = AnalysisProcessor(
         thresholds={
             "prompt_injection": config.thresholds.prompt_injection,
@@ -451,17 +470,4 @@ def build_default_runtime(config: FisheyeConfig | None = None) -> FisheyeRuntime
         config.oversight.cost_budget,
         config.oversight.call_budget,
     )
-    runtime = FisheyeRuntime(
-        bus=AsyncEventBus(queue_size=config.bus.queue_size, default_retries=config.bus.retry_attempts, overflow="drop"),
-        preprocessor_pipelines={
-            "raw": _build_preprocessor_pipeline(config, include_redaction=False, feature_only=False),
-            "redacted": _build_preprocessor_pipeline(config, include_redaction=True, feature_only=False),
-            "feature_only": _build_preprocessor_pipeline(config, include_redaction=True, feature_only=True),
-        },
-        store=store,
-    )
-    runtime.analysis = analysis
-    runtime.detector_engine = analysis
-    runtime.logger = logger
-    runtime.config = config
-    return runtime
+    return analysis

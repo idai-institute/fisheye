@@ -4,6 +4,7 @@ import argparse
 import asyncio
 import importlib.metadata
 import json
+from itertools import islice
 from pathlib import Path
 
 from fisheye.config import FisheyeConfig
@@ -88,11 +89,11 @@ def _output(data, path=None):
 
 
 async def _run(args, cfg):
-    from fisheye.analysis import AnalysisProcessor
     from fisheye.evaluation import compare, evaluate, replay
     from fisheye.evaluation.replay import load_events
     from fisheye.evaluation.scenarios import corpus
     from fisheye.policies import Policy, Supervisor
+    from fisheye.runtime import build_analysis
 
     if args.command == "doctor":
         versions = {}
@@ -120,11 +121,7 @@ async def _run(args, cfg):
     if args.command == "replay":
         report = await replay(
             load_events(args.path),
-            AnalysisProcessor(
-                thresholds=cfg.thresholds.model_dump(),
-                detector_weights=cfg.detector_weights,
-                config_version=cfg.fingerprint,
-            ),
+            build_analysis(cfg),
         )
         _output(report, args.output)
         return int(bool(report["errors"]))
@@ -136,11 +133,7 @@ async def _run(args, cfg):
             raise ValueError("No scenarios selected")
         report = await evaluate(
             scenarios,
-            lambda: AnalysisProcessor(
-                thresholds=cfg.thresholds.model_dump(),
-                detector_weights=cfg.detector_weights,
-                config_version=cfg.fingerprint,
-            ),
+            lambda: build_analysis(cfg),
         )
         _output(report, args.output)
         return int(report["passed"] != report["scenarios"])
@@ -152,8 +145,10 @@ async def _run(args, cfg):
     runtime = build_default_runtime(cfg)
     if args.command in {"record", "ingest", "demo"}:
         async with runtime:
-            events = load_events(args.path) if args.command != "demo" else corpus()[0]["events"]
-            receipts = [await runtime.publish(e) for e in events]
+            events = iter(load_events(args.path) if args.command != "demo" else corpus()[0]["events"])
+            receipts = []
+            while batch := list(islice(events, 100)):
+                receipts.extend(await runtime.ingest(batch))
             await runtime.drain(30)
             _output(
                 dict(

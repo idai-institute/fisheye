@@ -18,6 +18,22 @@ def test_cli_evaluation_and_doctor_do_not_create_database(tmp_path, monkeypatch,
     assert not (tmp_path / "fisheye.db").exists()
 
 
+def test_cli_record_stream_and_replay(tmp_path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+    path = tmp_path / "input.jsonl"
+    path.write_text(
+        "\n".join(
+            EventEnvelope(event_type="agent.start", agent_id="a", run_id="r").model_dump_json() for _ in range(101)
+        )
+    )
+    assert main(["record", str(path)]) == 0
+    assert json.loads(capsys.readouterr().out)["accepted"] == 101
+    assert main(["export", "captured.jsonl"]) == 0
+    capsys.readouterr()
+    assert main(["replay", "captured.jsonl"]) == 0
+    assert json.loads(capsys.readouterr().out)["events"] == 101
+
+
 def test_migration_keeps_source_untouched_and_has_dry_run(tmp_path):
     async def run():
         source = tmp_path / "old.db"
