@@ -1,5 +1,7 @@
 import asyncio
 
+import pytest
+
 from fisheye.adapters.langchain import LangChainAdapter
 from fisheye.bus.async_bus import AsyncEventBus
 from fisheye.collectors.base import Collector
@@ -50,5 +52,23 @@ def test_async_drain_awaits_callback_submissions():
             adapter.as_callback_handler().on_llm_start({}, ["hello"])
             await runtime.drain(2)
             assert len(recorder.events) == 1
+
+    asyncio.run(run())
+
+
+def test_foreign_thread_callback_errors_surface_at_drain():
+    async def run():
+        runtime = FisheyeRuntime(AsyncEventBus())
+        async with runtime:
+
+            async def unavailable(event):
+                raise ValueError("acceptance unavailable")
+
+            runtime.publish = unavailable
+            handler = LangChainAdapter(runtime, "a", "r").as_callback_handler()
+            await asyncio.to_thread(handler.on_llm_start, {}, ["hello"])
+            await asyncio.sleep(0.01)
+            with pytest.raises(RuntimeError, match="Callback delivery failed"):
+                await runtime.drain(2)
 
     asyncio.run(run())

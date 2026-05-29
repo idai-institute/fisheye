@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import time
 from pathlib import Path
+from threading import Lock
 from typing import Any, Coroutine
 
 from fisheye.analysis import AnalysisProcessor
@@ -83,6 +84,7 @@ class FisheyeRuntime:
         self._loop: asyncio.AbstractEventLoop | None = None
         self._pending: set[asyncio.Task[Any]] = set()
         self._sync_bridge: Any = None
+        self._submission_lock = Lock()
         self._flush_task: asyncio.Task[None] | None = None
         self.analysis: AnalysisProcessor | None = None
         self._journal_task: asyncio.Task[None] | None = None
@@ -100,7 +102,11 @@ class FisheyeRuntime:
         except RuntimeError:
             loop = None
         if self._loop and self._loop.is_running() and loop is not self._loop:
-            return asyncio.run_coroutine_threadsafe(coroutine, self._loop)
+
+            async def tracked():
+                return await self.submit(coroutine)
+
+            return asyncio.run_coroutine_threadsafe(tracked(), self._loop)
         if loop is not None:
             task = loop.create_task(coroutine)
             self._pending.add(task)
@@ -113,10 +119,11 @@ class FisheyeRuntime:
 
             task.add_done_callback(completed)
             return task
-        if self._sync_bridge is None:
-            from fisheye.sync.wrappers import SyncFisheyeRuntime
+        with self._submission_lock:
+            if self._sync_bridge is None:
+                from fisheye.sync.wrappers import SyncFisheyeRuntime
 
-            self._sync_bridge = SyncFisheyeRuntime(self)
+                self._sync_bridge = SyncFisheyeRuntime(self)
         return self._sync_bridge.submit(coroutine).result()
 
     def close(self) -> None:
