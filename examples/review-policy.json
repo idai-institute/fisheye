@@ -1,0 +1,12 @@
+{
+  "name": "review-outbound-actions",
+  "allowed_tools": ["search", "send", "upload"],
+  "review_tools": ["send", "upload"],
+  "allowed_destinations": ["approved.example"],
+  "deny_sensitive_egress": true,
+  "max_cost": 10,
+  "max_tokens": 50000,
+  "max_calls": 200,
+  "reviewers": ["operator"],
+  "approval_ttl_seconds": 300
+}

@@ -1,0 +1,17 @@
+[storage]
+sqlite_path = "./example-data/fisheye.db"
+events_jsonl_path = "./example-data/events.jsonl"
+alerts_jsonl_path = "./example-data/alerts.jsonl"
+capture = "redacted"
+retention_days = 30
+state_ttl_seconds = 86400
+
+[api]
+host = "127.0.0.1"
+port = 8000
+
+[oversight]
+graph_max_events = 2000
+token_budget = 100000
+cost_budget = 100.0
+call_budget = 1000
