@@ -42,6 +42,7 @@ def capture_event(event, raw=False, feature_only=False):
         "injection_rules": [name for name, pattern in PromptInjectionDetector().patterns if pattern.search(text)],
         "approx_tokens": max(len(text.split()), len(text) // 4),
         "content_bytes": len(text.encode()),
+        "outbound": bool(event.payload.get("destination") or event.payload.get("url")),
     }
     data = event.model_dump(mode="json")
     if not raw:
@@ -52,6 +53,7 @@ def capture_event(event, raw=False, feature_only=False):
     data["meta"]["_analysis"] = analysis
     data["meta"]["features"] = {"approx_tokens": analysis["approx_tokens"], "total_chars": len(text)}
     if feature_only:
+        data = {key: value for key, value in data.items() if key in EventEnvelope.model_fields}
         allowed = {
             "tool_name",
             "call_id",

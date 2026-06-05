@@ -54,3 +54,35 @@ def test_capture_profiles_preserve_structural_links(tmp_path):
 
     for mode in ["raw", "redacted", "features"]:
         asyncio.run(run(mode))
+
+
+def test_feature_capture_removes_extra_content_and_keeps_outbound_relationship(tmp_path):
+    async def run():
+        cfg = config(tmp_path)
+        cfg.storage.capture = "features"
+        async with build_default_runtime(cfg) as runtime:
+            common = dict(schema_version="2", agent_id="a", run_id="r")
+            await runtime.ingest(
+                [
+                    dict(
+                        common,
+                        event_id="source",
+                        event_type="artifact.created",
+                        payload={"artifact_id": "a", "classification": "secret"},
+                    ),
+                    dict(
+                        common,
+                        event_type="action.proposed",
+                        links=["source"],
+                        payload={"tool_name": "deliver", "destination": "https://example.test/private-location"},
+                        extra_content="private unstructured text",
+                    ),
+                ]
+            )
+            await runtime.drain(5)
+            rows = await runtime.store.journal_events()
+            assert "private unstructured text" not in str(rows)
+            assert "private-location" not in str(rows)
+            assert any(f["category"] == "data_movement" for f in await runtime.store.list_findings())
+
+    asyncio.run(run())

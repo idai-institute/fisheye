@@ -181,7 +181,7 @@ class WorkflowGraph:
                     "confidential",
                 }
                 outbound = sink["kind"] in {"network.request", "file.write", "artifact.transferred"} or bool(
-                    sp.get("destination") or sp.get("url")
+                    sp.get("destination") or sp.get("url") or sink["analysis"].get("outbound")
                 )
                 signatures = []
                 if injection and (tool in {"shell", "http", "upload", "send", "file_write", "python_exec"} or outbound):
