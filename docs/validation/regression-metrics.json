@@ -1,0 +1,29 @@
+{
+  "scenarios": 7,
+  "passed": 7,
+  "metrics": {
+    "data_movement": {
+      "tp": 1,
+      "fp": 0,
+      "fn": 0,
+      "precision": 1.0,
+      "recall": 1.0
+    },
+    "injection_propagation": {
+      "tp": 2,
+      "fp": 0,
+      "fn": 0,
+      "precision": 1.0,
+      "recall": 1.0
+    },
+    "coordination": {
+      "tp": 1,
+      "fp": 0,
+      "fn": 0,
+      "precision": 1.0,
+      "recall": 1.0
+    }
+  },
+  "benign_workflows": 3,
+  "false_findings_per_100_benign": 0.0
+}

@@ -1,0 +1,16 @@
+{
+  "actions": 100,
+  "python": "3.12.13",
+  "architecture": "aarch64",
+  "evaluation_ms": {
+    "p50": 0.005,
+    "p95": 0.006,
+    "p99": 0.02
+  },
+  "durable_proposal_ms": {
+    "p50": 52.641,
+    "p95": 58.096,
+    "p99": 59.336
+  },
+  "external_tools_executed": 0
+}

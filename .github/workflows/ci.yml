@@ -13,8 +13,8 @@ jobs:
           python-version: '${{ matrix.python }}'
       - run: python -m pip install -e '.[dev]'
       - run: python -m pytest -q
-      - run: ruff check fisheye
-      - run: ruff format --check fisheye
+      - run: ruff check fisheye tools examples
+      - run: ruff format --check fisheye tools examples
       - run: python -m build
       - run: python tools/wheel_smoke.py
       - run: fisheye evaluate --split all

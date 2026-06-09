@@ -1,0 +1,103 @@
+{
+  "python": "3.12.13",
+  "platform": "Linux",
+  "architecture": "aarch64",
+  "events": 1000,
+  "workflow_size": 10,
+  "batch_size": 1,
+  "consumers": 4,
+  "payload_bytes": 2040,
+  "offered_rate": 0,
+  "admission_seconds": 8.444,
+  "completion_seconds": 8.515,
+  "completed_events_per_second": 117.44,
+  "batch_acceptance_ms": {
+    "p50": 6.053,
+    "p95": 17.495,
+    "p99": 19.655
+  },
+  "analysis_ms": {
+    "p50": 0.707,
+    "p95": 1.359,
+    "p99": 1.848
+  },
+  "publish_to_analysis_ms": {
+    "p50": 34.666,
+    "p95": 50.037,
+    "p99": 55.032
+  },
+  "publish_to_projection_ms": {
+    "p50": 48.679,
+    "p95": 65.85,
+    "p99": 73.38
+  },
+  "sampled_peak_rss_kib": 43340,
+  "journal": {
+    "accepted": 1000,
+    "pending": 0,
+    "oldest_pending": null,
+    "dead_letters": 0
+  },
+  "consumer_counts": [
+    1000,
+    1000,
+    1000,
+    1000
+  ],
+  "delivery": {
+    "published": 1000,
+    "dropped": 0,
+    "collector_errors": 0,
+    "rejected": 0,
+    "consumers": {
+      "1": {
+        "delivered": 1000,
+        "processed": 1000,
+        "dropped": 0,
+        "errors": 0,
+        "retries": 0,
+        "name": "benchmark-counter",
+        "queued": 0
+      },
+      "2": {
+        "delivered": 1000,
+        "processed": 1000,
+        "dropped": 0,
+        "errors": 0,
+        "retries": 0,
+        "name": "benchmark-counter",
+        "queued": 0
+      },
+      "3": {
+        "delivered": 1000,
+        "processed": 1000,
+        "dropped": 0,
+        "errors": 0,
+        "retries": 0,
+        "name": "benchmark-counter",
+        "queued": 0
+      },
+      "4": {
+        "delivered": 1000,
+        "processed": 1000,
+        "dropped": 0,
+        "errors": 0,
+        "retries": 0,
+        "name": "benchmark-counter",
+        "queued": 0
+      }
+    },
+    "journal": {
+      "accepted": 1000,
+      "pending": 0,
+      "oldest_pending": null,
+      "dead_letters": 0
+    },
+    "analysis_error": null,
+    "export_error": null,
+    "coverage": {
+      "prompt_injection_rules": "evaluated",
+      "data_exfiltration_rules": "evaluated"
+    }
+  }
+}
