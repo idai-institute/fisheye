@@ -24,6 +24,7 @@ def test_workflow_graph_review_and_body_limit(tmp_path):
         event = dict(
             schema_version="2",
             application_id="forged",
+            observed_at="2099-01-01T00:00:00Z",
             event_type="message.sent",
             agent_id="a",
             run_id="r",
@@ -33,6 +34,8 @@ def test_workflow_graph_review_and_body_limit(tmp_path):
         response = client.post("/v1/events", headers=headers, json=event)
         assert response.status_code == 200
         assert response.json()["receipts"][0]["durable"]
+        captured = client.get("/v2/workflows/w/events", headers=headers).json()["items"][0]["event"]
+        assert not captured["observed_at"].startswith("2099")
         assert client.get("/v2/workflows", headers=headers).json()[0]["application_id"] == "default"
         assert client.get("/workflows/w", headers=headers).status_code == 200
         review = client.get("/v2/reviews", headers=headers).json()[0]

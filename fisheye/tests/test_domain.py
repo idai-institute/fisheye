@@ -32,3 +32,15 @@ def test_event_size_and_nonfinite_values_rejected():
     for payload in [{"x": float("nan")}, {"x": "x" * 262144}]:
         with pytest.raises(ValidationError):
             EventEnvelope(event_type="custom.test", agent_id="a", run_id="r", payload=payload)
+
+
+def test_delegation_deadline_is_normalized_and_relationships_validate_legacy_input():
+    event = EventEnvelope(
+        event_type="task.delegated",
+        agent_id="a",
+        run_id="r",
+        payload={"task_id": "t", "recipient_id": "b", "deadline": "2026-01-01T14:00:00+03:00"},
+    )
+    assert event.payload["deadline"] == "2026-01-01T11:00:00Z"
+    with pytest.raises(ValidationError):
+        EventEnvelope(event_type="task.delegated", agent_id="a", run_id="r", payload={})

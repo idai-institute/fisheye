@@ -4,6 +4,7 @@ import asyncio
 import base64
 import hmac
 from dataclasses import asdict
+from datetime import datetime, timezone
 from typing import Annotated, Any
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query
@@ -59,6 +60,7 @@ def register_routes(app: FastAPI, runtime: Any, api_key: str | None = None) -> N
             # Bind remote identities to the configured application and producer.
             event.application_id = runtime.config.api.application_id
             event.producer_id = runtime.config.api.producer_id
+            event.observed_at = datetime.now(timezone.utc)
             event.meta.pop("_analysis", None)
             try:
                 receipts.append(asdict(await runtime.publish(event)))

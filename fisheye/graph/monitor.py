@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+from datetime import datetime
 
 from fisheye.schema.domain import Finding
 
@@ -128,7 +129,9 @@ class WorkflowGraph:
                 if task.get("status") in {"completed", "failed", "cancelled"}:
                     continue
                 deadline = task.get("deadline")
-                if event.event_type == "workflow.stop" or (deadline and deadline < event.timestamp.isoformat()):
+                if event.event_type == "workflow.stop" or (
+                    deadline and datetime.fromisoformat(deadline.replace("Z", "+00:00")) < event.timestamp
+                ):
                     emit(
                         "coordination",
                         task_id + ":overdue",

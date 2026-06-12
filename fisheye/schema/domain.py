@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from typing import Any, Literal
 from uuid import uuid4
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class Payload(BaseModel):
@@ -20,6 +20,15 @@ class Delegation(Payload):
     allowed_tools: list[str] = Field(default_factory=list)
     source_event_ids: list[str] = Field(default_factory=list)
     deadline: datetime | None = None
+
+    @field_validator("deadline")
+    @classmethod
+    def utc_deadline(cls, value):
+        if value is None:
+            return None
+        if value.tzinfo is None:
+            value = value.replace(tzinfo=timezone.utc)
+        return value.astimezone(timezone.utc)
 
 
 class Message(Payload):
