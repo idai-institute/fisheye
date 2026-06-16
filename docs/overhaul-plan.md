@@ -1,6 +1,6 @@
 Fisheye overhaul proposal
 
-Design baseline: commit `d070461`. This proposal describes the intended architecture and delivery gates. See the release notes for implemented capabilities and validation results.
+Design baseline: commit `d070461`. This proposal describes the intended architecture and delivery gates. See the [0.2 release notes](release-notes.md) for implemented capabilities and validation results, and the [performance report](performance.md) for measured results and outstanding targets.
 
 The proposed direction is a Python oversight library that reconstructs how agents collaborate, detects failures and policy violations with traceable evidence, and optionally supervises actions before they execute. Keep installation and local operation simple. Make production oversight the primary design assumption, with debugging and research evaluation built on the same event and replay model.
 
