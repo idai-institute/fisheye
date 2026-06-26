@@ -1,0 +1,22 @@
+{
+  "version": "0.2.0",
+  "implementation_revision": "f1f0d82",
+  "local_tests": [
+    {"python": "3.12", "native_integrations": true, "passed": 73, "skipped": 0, "upstream_deprecation_warnings": 8},
+    {"python": "3.10", "native_integrations": false, "passed": 68, "skipped": 5},
+    {"python": "3.13", "native_integrations": false, "passed": 68, "skipped": 5}
+  ],
+  "ruff_check": "passed",
+  "ruff_format": "passed",
+  "wheel_build": "passed",
+  "sdist_build": "passed",
+  "isolated_core_install": "passed",
+  "isolated_server_install": "passed",
+  "packaged_templates": "passed",
+  "offline_corpus": {"scenarios": 7, "passed": 7},
+  "documented_examples": "passed",
+  "relative_document_links": "passed",
+  "hosted_ci_executed": false,
+  "sustained_1000_events_per_second_certified": false,
+  "wall_clock_24_hour_soak_executed": false
+}

@@ -17,6 +17,18 @@ This release turns the event-monitoring prototype into a local multi-agent overs
 
 The release suite covers lifecycle/threaded callbacks, detector regressions, privacy/authentication, event conflicts, transaction rollback, abrupt process exit and restart, graph causality/isolation, plugin failures/expiry, budget/approval concurrency, API reviews, migration/retention, CLI recording/replay, and native integrations.
 
+| Local verification | Result |
+| --- | --- |
+| Python 3.12 with all four optional integrations | 73 tests passed; eight upstream Camel deprecation warnings |
+| Python 3.10 core/server development environment | 68 passed; five optional native integration tests skipped |
+| Python 3.13 core/server development environment | 68 passed; five optional native integration tests skipped |
+| Ruff lint and formatting | Passed across library, tests, examples and tools |
+| Wheel and source archive | Built successfully; isolated core/server wheel checks passed |
+| Offline corpus | Seven of seven assessed scenarios passed |
+| Local examples and documentation | README/supervision examples, full local workflow example and relative links passed |
+
+These are locally executed checks. The repository also defines CI jobs; no hosted CI run is implied by this report.
+
 See [performance and evaluation](performance.md) for recorded load results and seven-scenario regression metrics, and [integration contracts](integrations.md) for exact tested versions and capabilities. Package checks install the wheel outside the checkout, first with core dependencies and then the server extra. README and supervision examples run without external credentials.
 
 ## Compatibility and operating boundary
