@@ -95,6 +95,9 @@ class FisheyeRuntime:
         self._export_error: str | None = None
         self._callback_errors: list[str] = []
         self._last_maintenance = time.monotonic()
+        self._journal_busy = False
+        self._projection_errors = 0
+        self._projection_last_error: str | None = None
 
     def submit(self, coroutine: Coroutine[Any, Any, Any]) -> Any:
         try:
@@ -191,6 +194,7 @@ class FisheyeRuntime:
         while True:
             self._wake.clear()
             try:
+                self._journal_busy = True
                 pending = await self.store.pending()
                 states, results = {}, []
                 for sequence, event in pending:
@@ -205,8 +209,14 @@ class FisheyeRuntime:
                     await self.store.commit_analysis_batch(results)
                 for sequence, event in pending:
                     for mode in sorted(self._active_modes()):
-                        for projected in await self.preprocessor_pipelines[mode].process(event.model_copy(deep=True)):
-                            await self._publish_mode(projected, mode)
+                        try:
+                            for projected in await self.preprocessor_pipelines[mode].process(
+                                event.model_copy(deep=True)
+                            ):
+                                await self._publish_mode(projected, mode)
+                        except Exception as exc:
+                            self._projection_errors += 1
+                            self._projection_last_error = type(exc).__name__
                 self._analysis_error = None
                 self._journal_metrics = await self.store.journal_metrics()
                 if pending:
@@ -215,6 +225,8 @@ class FisheyeRuntime:
                 self._analysis_error = type(exc).__name__
                 await asyncio.sleep(0.1)
                 continue
+            finally:
+                self._journal_busy = False
             await self._wake.wait()
 
     async def _export_journal(self) -> None:
@@ -261,16 +273,9 @@ class FisheyeRuntime:
             await asyncio.gather(self._flush_task, return_exceptions=True)
             self._flush_task = None
 
-        for mode in sorted(self._active_modes()):
-            pipeline = self.preprocessor_pipelines.get(mode)
-            if pipeline is None:
-                continue
-
-            flushed = await pipeline.flush()
-            for event in flushed:
-                await self._publish_mode(event, mode)
-
         try:
+            for mode in sorted(self._active_modes()):
+                await self._flush_mode(mode)
             await self.drain(timeout=10.0)
         finally:
             if self._journal_task:
@@ -335,34 +340,37 @@ class FisheyeRuntime:
         return receipts
 
     async def drain(self, timeout: float | None = None) -> None:
+        # One deadline covers all stages. A timed-out waiter must not cancel producers.
+        await asyncio.wait_for(self._drain(asyncio.current_task()), timeout)
+
+    def _raise_callback_errors(self):
         if self._callback_errors:
             errors, self._callback_errors = self._callback_errors, []
             raise RuntimeError("Callback delivery failed: " + ", ".join(errors))
-        pending = self._pending - {asyncio.current_task()}
-        if pending:
-            await asyncio.wait_for(asyncio.gather(*pending), timeout)
+
+    async def _drain(self, caller) -> None:
+        self._raise_callback_errors()
+        while pending := self._pending - {caller}:
+            await asyncio.shield(asyncio.gather(*pending, return_exceptions=True))
             self._pending.difference_update(pending)
+            self._raise_callback_errors()
         if self.analysis is not None and isinstance(self.store, JournalStore):
-
-            async def finish_journal() -> None:
-                while (await self.store.journal_metrics())["pending"]:
-                    if self._analysis_error:
-                        raise RuntimeError(f"Analysis unavailable: {self._analysis_error}")
-                    self._wake.set()
-                    await asyncio.sleep(0.005)
-
-            await asyncio.wait_for(finish_journal(), timeout)
-
-            async def finish_exports():
-                while await self.store.pending_exports(1):
-                    if self._export_error:
-                        raise RuntimeError("Export unavailable: " + self._export_error)
-                    await asyncio.sleep(0.005)
-
-            await asyncio.wait_for(finish_exports(), timeout)
+            while True:
+                metrics = await self.store.journal_metrics()
+                if self._analysis_error:
+                    raise RuntimeError(f"Analysis unavailable: {self._analysis_error}")
+                if not metrics["pending"] and not self._journal_busy:
+                    break
+                self._wake.set()
+                await asyncio.sleep(0.005)
+            while await self.store.pending_exports(1):
+                if self._export_error:
+                    raise RuntimeError("Export unavailable: " + self._export_error)
+                await asyncio.sleep(0.005)
         for mode in sorted(self._active_modes()):
             await self._flush_mode(mode)
-        await self.bus.drain(timeout=timeout)
+        await self.bus.drain()
+        self._raise_callback_errors()
 
     @property
     def metrics(self) -> dict[str, Any]:
@@ -371,6 +379,8 @@ class FisheyeRuntime:
             journal=self._journal_metrics,
             analysis_error=self._analysis_error,
             export_error=self._export_error,
+            projection_errors=self._projection_errors,
+            projection_last_error=self._projection_last_error,
             coverage=self.analysis.coverage if self.analysis else {},
         )
 

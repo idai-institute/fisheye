@@ -37,6 +37,8 @@ Optional bus consumers have independent bounded queues, processing/error/drop co
 
 `drain(timeout)` waits for current callbacks, journal processing, export, preprocessing, and consumer queues. Callback/plugin/export failures have distinct diagnostics. `stop()` drains with a finite timeout and stops tasks. `aclose()` and context managers also close storage. Do not share an async runtime between unrelated event loops; use its sync wrapper for synchronous producers.
 
+The drain timeout covers the entire operation, including post-commit consumer projection. Timing out a drain waiter does not cancel outstanding producer callbacks. Optional projection failures are counted separately in `projection_errors` with a `projection_last_error` type; one failed route does not suppress delivery to other routes or later events. Shutdown cleans up workers even when a preprocessor fails to flush.
+
 ## Identity, causality and bounded state
 
 Version 2 adds application, environment, workflow, task, agent instance/version, producer sequence, trace/span IDs, and explicit source links. Version 1 input remains accepted. Its `run_id` is a legacy workflow group; relationships are unknown unless supplied. Relationship payloads are validated regardless of envelope version.
