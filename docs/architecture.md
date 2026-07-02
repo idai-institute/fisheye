@@ -27,7 +27,7 @@ Analysis reads accepted events in journal order. Each transaction writes event/a
 
 Batch acceptance is all-or-nothing. HTTP ingestion preserves its per-event receipt contract: a 409/429 can contain receipts for earlier accepted events. Inspect receipts and retry with unchanged IDs. A 202 means acceptance succeeded while analysis or export is still pending/degraded.
 
-SQLite serializes concurrent producers and supervised action claims. Run **one analysis runtime per database**. There is no distributed analyzer lease or leader election. Use a single HTTP collector process for multiple remote producers; do not run multiple server workers against one database.
+SQLite serializes concurrent producers and supervised action claims. Run **one analysis runtime per database**. An OS-held `.analysis.lock` rejects a second local analyzer and is released when its owner closes or exits. It is not distributed leader election; keep the database and lock on a local filesystem, use one canonical database path, and never delete an active lock file. Use a single HTTP collector process for multiple remote producers. Other journal connections may accept events; the analyzer polls for their work every `storage.poll_interval_seconds` (default 0.25 seconds).
 
 ## Export and consumers
 

@@ -10,6 +10,8 @@ The CLI binds to loopback by default and requires an API key for remote binding.
 
 Use one server worker per database. Native adapters and host code may run in that process, or remote producers may submit events over HTTP. Raw capture is explicit and applies to all data stored by that runtime. Turning redaction on does not rewrite existing raw history.
 
+Starting a second analyzer against the same local database now fails immediately. Its persistent `.analysis.lock` file is harmless when no process holds the lock; do not remove it to bypass ownership. Startup failures release ownership and stop workers. A closed runtime cannot be restarted; construct a new runtime after `close()`/`aclose()`.
+
 ## API
 
 Data endpoints and dashboards require the configured API credential. `/v1/health` exposes minimal liveness without credentials; `/v2/health` includes protected diagnostics. OpenAPI schemas are available at `/docs`.

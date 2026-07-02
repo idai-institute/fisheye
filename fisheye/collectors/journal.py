@@ -157,7 +157,14 @@ class JournalStore(SQLiteStore):
                 finally:
                     self._transaction = False
 
-        await asyncio.to_thread(commit_batch)
+        task = asyncio.create_task(asyncio.to_thread(commit_batch))
+        try:
+            await asyncio.shield(task)
+        except asyncio.CancelledError:
+            # SQLite writes in a thread cannot be cancelled. Retain ownership until
+            # the transaction settles, then let shutdown release the analyzer lock.
+            await task
+            raise
 
     def _commit_analysis(self, sequence, event, state, alerts, findings, signals, errors, save_checkpoint=True):
         with self._lock:

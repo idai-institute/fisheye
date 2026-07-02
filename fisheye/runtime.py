@@ -98,6 +98,9 @@ class FisheyeRuntime:
         self._journal_busy = False
         self._projection_errors = 0
         self._projection_last_error: str | None = None
+        self._lifecycle_lock = asyncio.Lock()
+        self._analysis_lease = None
+        self._closed = False
 
     def submit(self, coroutine: Coroutine[Any, Any, Any]) -> Any:
         try:
@@ -134,18 +137,27 @@ class FisheyeRuntime:
             self._sync_bridge.close()
         elif self._started:
             raise RuntimeError("Use 'await aclose()' for an asynchronous runtime")
-        elif self.store:
-            self.store.close()
+        else:
+            self._close_store()
+
+    def _close_store(self):
+        if not self._closed:
+            if self.store:
+                self.store.close()
+            self._closed = True
 
     async def aclose(self) -> None:
         try:
             await self.stop()
         finally:
-            if self.store:
-                self.store.close()
+            self._close_store()
 
     async def __aenter__(self) -> "FisheyeRuntime":
-        await self.start()
+        try:
+            await self.start()
+        except BaseException:
+            self._close_store()
+            raise
         return self
 
     async def __aexit__(self, *_: Any) -> None:
@@ -177,17 +189,35 @@ class FisheyeRuntime:
         return sub_id
 
     async def start(self) -> None:
+        async with self._lifecycle_lock:
+            await self._start()
+
+    async def _start(self) -> None:
+        if self._closed:
+            raise RuntimeError("Runtime is closed")
         if self._started:
             return
         self._loop = asyncio.get_running_loop()
-        await self.bus.start()
-        self._started = True
-        self._flush_task = asyncio.create_task(self._flush_periodically())
-        if self.analysis is not None and isinstance(self.store, JournalStore):
-            await self.store.prune(self.config.storage.retention_days, self.config.storage.state_ttl_seconds)
-            self._journal_task = asyncio.create_task(self._process_journal())
-            self._export_task = asyncio.create_task(self._export_journal())
-            self._wake.set()
+        self._wake = asyncio.Event()
+        try:
+            if self.analysis is not None and isinstance(self.store, JournalStore):
+                from fisheye.state.lease import AnalysisLease
+
+                self._analysis_lease = AnalysisLease(self.store.db_path)
+                self._analysis_lease.acquire()
+                await self.store.prune(self.config.storage.retention_days, self.config.storage.state_ttl_seconds)
+            await self.bus.start()
+            self._flush_task = asyncio.create_task(self._flush_periodically())
+            if self.analysis is not None and isinstance(self.store, JournalStore):
+                self._journal_task = asyncio.create_task(self._process_journal())
+                self._export_task = asyncio.create_task(self._export_journal())
+                self._wake.set()
+            self._started = True
+        except BaseException:
+            await self.bus.stop()
+            if self._analysis_lease:
+                self._analysis_lease.release()
+            raise
 
     async def _process_journal(self) -> None:
         assert isinstance(self.store, JournalStore) and self.analysis is not None
@@ -227,7 +257,10 @@ class FisheyeRuntime:
                 continue
             finally:
                 self._journal_busy = False
-            await self._wake.wait()
+            try:
+                await asyncio.wait_for(self._wake.wait(), self.config.storage.poll_interval_seconds)
+            except asyncio.TimeoutError:
+                pass
 
     async def _export_journal(self) -> None:
         while True:
@@ -265,6 +298,10 @@ class FisheyeRuntime:
             await self._publish_mode(event, mode)
 
     async def stop(self) -> None:
+        async with self._lifecycle_lock:
+            await self._stop()
+
+    async def _stop(self) -> None:
         if not self._started:
             return
 
@@ -288,6 +325,8 @@ class FisheyeRuntime:
                 self._export_task = None
             await self.bus.stop()
             self._started = False
+            if self._analysis_lease:
+                self._analysis_lease.release()
 
     async def publish(self, event: EventEnvelope | dict[str, Any]) -> DeliveryReceipt:
         if not self._started:

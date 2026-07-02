@@ -29,6 +29,7 @@ htmlcov/
 *.db
 *.db-wal
 *.db-shm
+*.analysis.lock
 *.sqlite
 *.sqlite3
 *.jsonl

@@ -18,6 +18,7 @@ class StorageConfig(ConfigModel):
     events_jsonl_path: Path = Path("./fisheye-events.jsonl")
     alerts_jsonl_path: Path = Path("./fisheye-alerts.jsonl")
     max_pending: int = Field(default=100000, ge=1)
+    poll_interval_seconds: float = Field(default=0.25, ge=0.01, le=60)
     retention_days: int = Field(default=30, ge=1)
     state_ttl_seconds: int = Field(default=86400, ge=1)
     capture: Literal["redacted", "raw", "features"] = "redacted"

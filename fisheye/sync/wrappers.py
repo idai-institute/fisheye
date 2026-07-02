@@ -73,8 +73,7 @@ class SyncFisheyeRuntime:
         try:
             self.stop()
         finally:
-            if self.runtime.store:
-                self.runtime.store.close()
+            self.runtime._close_store()
 
     def publish(self, event: EventEnvelope | dict[str, Any]) -> Any:
         return self._call(self.runtime.publish(event))
