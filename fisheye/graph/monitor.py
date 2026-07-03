@@ -40,6 +40,7 @@ class WorkflowGraph:
                 Finding(
                     finding_id=fid,
                     application_id=event.application_id,
+                    environment=event.environment,
                     workflow_id=event.workflow,
                     category=category,
                     severity="high" if score >= 0.8 else "medium",

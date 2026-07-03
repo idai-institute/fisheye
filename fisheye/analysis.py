@@ -159,6 +159,7 @@ class AnalysisProcessor:
                     Finding(
                         finding_id=hashlib.sha256(key.encode()).hexdigest()[:32],
                         application_id=event.application_id,
+                        environment=event.environment,
                         workflow_id=event.workflow,
                         category=alert.category,
                         severity="high",

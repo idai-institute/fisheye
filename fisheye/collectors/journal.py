@@ -11,6 +11,8 @@ from datetime import datetime, timezone
 
 from fisheye.bus.async_bus import DeliveryReceipt, OverloadedError
 from fisheye.collectors.sqlite_store import SQLiteStore
+from fisheye.findings import merge_finding
+from fisheye.schema.domain import Finding
 from fisheye.schema.events import EventEnvelope
 
 
@@ -190,16 +192,17 @@ class JournalStore(SQLiteStore):
                         "SELECT status,data_json FROM findings WHERE finding_id=?", (finding.finding_id,)
                     ).fetchone()
                     if old:
-                        previous = json.loads(old["data_json"])
-                        finding.status = old["status"]
-                        finding.first_seen = min(
-                            finding.first_seen, datetime.fromisoformat(previous["first_seen"].replace("Z", "+00:00"))
-                        )
-                        finding.last_seen = max(
-                            finding.last_seen, datetime.fromisoformat(previous["last_seen"].replace("Z", "+00:00"))
-                        )
-                        finding.event_ids = sorted(set(finding.event_ids + previous["event_ids"]))[-200:]
-                        finding.occurrences = previous.get("occurrences", 1) + 1
+                        finding = merge_finding(Finding.model_validate_json(old["data_json"]), finding)
+                        if old["status"] == "resolved" and finding.status == "open":
+                            self._conn.execute(
+                                "INSERT INTO audit(timestamp,actor,operation,data_json) VALUES(?,?,?,?)",
+                                (
+                                    event.observed_at.isoformat(),
+                                    "analysis",
+                                    "finding.reopened",
+                                    self._json({"finding_id": finding.finding_id, "reason": "new_evidence"}),
+                                ),
+                            )
                     self._conn.execute(
                         "INSERT OR REPLACE INTO findings VALUES(?,?,?,?,?,?)",
                         (
@@ -259,6 +262,7 @@ class JournalStore(SQLiteStore):
 
         def update():
             with self._lock, self._conn:
+                self._conn.execute("BEGIN IMMEDIATE")
                 row = self._conn.execute("SELECT data_json FROM findings WHERE finding_id=?", (finding_id,)).fetchone()
                 if row is None:
                     raise KeyError(finding_id)

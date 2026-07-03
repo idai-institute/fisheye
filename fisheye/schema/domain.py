@@ -68,6 +68,7 @@ class Usage(Payload):
 class Finding(BaseModel):
     finding_id: str
     application_id: str = "default"
+    environment: str = "local"
     workflow_id: str
     category: str
     severity: Literal["info", "low", "medium", "high", "critical"] = "medium"
@@ -77,6 +78,7 @@ class Finding(BaseModel):
     agent_ids: list[str] = Field(default_factory=list)
     event_ids: list[str] = Field(default_factory=list)
     evidence: dict[str, Any] = Field(default_factory=dict)
+    evidence_truncated: bool = False
     status: Literal["open", "acknowledged", "resolved", "false_positive"] = "open"
     detector_version: str = "2.0"
     config_version: str = ""

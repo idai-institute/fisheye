@@ -9,6 +9,7 @@ from collections import defaultdict
 from pathlib import Path
 
 from fisheye.analysis import AnalysisProcessor
+from fisheye.findings import merge_finding
 from fisheye.privacy import capture_event
 from fisheye.schema.events import EventEnvelope
 
@@ -31,12 +32,12 @@ async def replay(events, processor=None):
     count = 0
     latencies = []
     errors = []
+    coverage_issues = defaultdict(set)
     for raw in events:
         event = raw if isinstance(raw, EventEnvelope) else EventEnvelope.model_validate(raw)
-        # Journal captures contain already-derived local evidence. They are trusted
-        # only for offline evaluation; remote producers never get this privilege.
-        if "_analysis" not in event.meta:
-            event = capture_event(event)
+        if "observed_at" not in event.model_fields_set:
+            event = event.model_copy(update={"observed_at": event.timestamp})
+        # Compare original input before redaction can conceal a conflicting retry.
         fingerprint = hashlib.sha256(
             json.dumps(event.model_dump(mode="json", exclude={"observed_at"}), sort_keys=True).encode()
         ).hexdigest()
@@ -45,19 +46,19 @@ async def replay(events, processor=None):
                 raise ValueError("Conflicting duplicate event ID during replay")
             continue
         seen[event.event_id] = fingerprint
+        # Recorded annotations are trusted only by the offline evaluator.
+        if "_analysis" not in event.meta:
+            event = capture_event(event)
         started = time.perf_counter()
         result = await processor.analyze(event, states.get(event.scope))
         latencies.append((time.perf_counter() - started) * 1000)
         states[event.scope] = result.state
         for finding in result.findings:
-            data = finding.model_dump(mode="json")
-            if finding.finding_id in findings:
-                previous = findings[finding.finding_id]
-                data["event_ids"] = sorted(set(data["event_ids"] + previous["event_ids"]))
-                data["first_seen"] = previous["first_seen"]
-                data["occurrences"] = previous["occurrences"] + 1
-            findings[finding.finding_id] = data
+            findings[finding.finding_id] = merge_finding(findings.get(finding.finding_id), finding)
         errors.extend(result.errors)
+        for plugin, status in processor.coverage.items():
+            if status not in {"evaluated", "not_applicable"}:
+                coverage_issues[plugin].add(status)
         count += 1
     latencies.sort()
 
@@ -67,9 +68,14 @@ async def replay(events, processor=None):
     return dict(
         events=count,
         workflows=len(states),
-        findings=list(findings.values()),
+        findings=[f.model_dump(mode="json") for f in findings.values()],
         errors=errors,
         coverage=processor.coverage,
+        coverage_issues={plugin: sorted(statuses) for plugin, statuses in coverage_issues.items()},
+        config_version=processor.config_version,
+        detector_versions={
+            d.detector_id: getattr(getattr(d, "spec", None), "version", "1") for d in processor.detectors
+        },
         analysis_latency_ms=dict(p50=quantile(0.5), p95=quantile(0.95), p99=quantile(0.99)),
     )
 
@@ -83,23 +89,30 @@ async def evaluate(scenarios, processor_factory=AnalysisProcessor):
         expected = set(scenario.get("expected_categories", []))
         # A scenario may label selected categories; others are reported but unscored.
         assessed = set(scenario.get("assessed_categories", expected))
-        actual = {f["category"] for f in report["findings"]} & assessed
+        if not expected <= assessed:
+            raise ValueError("Expected categories must be included in assessed_categories")
+        assessed_findings = [f for f in report["findings"] if f["category"] in assessed]
+        actual = {f["category"] for f in assessed_findings}
         for category in assessed:
             totals[category]["tp"] += int(category in actual and category in expected)
             totals[category]["fp"] += int(category in actual and category not in expected)
             totals[category]["fn"] += int(category not in actual and category in expected)
         if not expected:
-            benign += 1
-            benign_false += len(actual)
+            benign += report["workflows"]
+            benign_false += len(assessed_findings)
         rows.append(
             dict(
                 name=scenario["name"],
                 split=scenario.get("split", "test"),
                 expected=sorted(expected),
                 actual=sorted(actual),
-                passed=actual == expected,
+                passed=actual == expected
+                and not report["errors"]
+                and not report["coverage_issues"]
+                and report["events"] > 0,
                 findings=report["findings"],
                 errors=report["errors"],
+                coverage_issues=report["coverage_issues"],
             )
         )
     metrics = {
@@ -122,14 +135,26 @@ async def evaluate(scenarios, processor_factory=AnalysisProcessor):
 
 def compare(before, after):
     def key(f):
-        return (f["application_id"], f["workflow_id"], f["category"], tuple(sorted(f["event_ids"])))
+        return (
+            f["application_id"],
+            f.get("environment", "local"),
+            f["workflow_id"],
+            f["category"],
+            f.get("finding_id", ""),
+            tuple(sorted(f["event_ids"])),
+        )
 
     old = {key(f): f for f in before["findings"]}
     new = {key(f): f for f in after["findings"]}
     return dict(
-        added=[new[k] for k in new.keys() - old.keys()],
-        removed=[old[k] for k in old.keys() - new.keys()],
+        added=[new[k] for k in sorted(new.keys() - old.keys())],
+        removed=[old[k] for k in sorted(old.keys() - new.keys())],
         changed=[
-            dict(before=old[k], after=new[k]) for k in new.keys() & old.keys() if old[k]["score"] != new[k]["score"]
+            dict(before=old[k], after=new[k])
+            for k in sorted(new.keys() & old.keys())
+            if any(
+                old[k].get(field) != new[k].get(field)
+                for field in ("score", "severity", "title", "evidence", "status", "agent_ids", "evidence_truncated")
+            )
         ],
     )
