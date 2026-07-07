@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+from collections import defaultdict, deque
 from datetime import datetime
 
 from fisheye.schema.domain import Finding
@@ -17,15 +18,20 @@ class WorkflowGraph:
         nodes = state.setdefault("nodes", {})
         tasks = state.setdefault("tasks", {})
         p = event.payload
-        parents = list(dict.fromkeys(event.links + p.get("source_event_ids", [])))
+        sources = p.get("source_event_ids", [])
+        valid_sources = [key for key in sources[:100] if isinstance(key, str)] if isinstance(sources, list) else []
+        if sources != valid_sources:
+            state["invalid_relationships"] = state.get("invalid_relationships", 0) + 1
+        parents = list(dict.fromkeys(event.links + valid_sources))
         nodes[event.event_id] = dict(
             id=event.event_id,
             agent=event.agent_id,
             kind=event.event_type,
             timestamp=event.timestamp.isoformat(),
+            task_id=event.task_id,
             parents=parents,
             payload=self.summary(p),
-            analysis=event.meta.get("_analysis", {}),
+            analysis=event.meta.get("_analysis", {}) if isinstance(event.meta.get("_analysis", {}), dict) else {},
         )
         if len(nodes) > self.max_events:
             for key in list(nodes)[: len(nodes) - self.max_events]:
@@ -59,6 +65,7 @@ class WorkflowGraph:
             old = tasks.get(task)
             if (
                 old
+                and old.get("recipient") is not None
                 and old.get("recipient") != p["recipient_id"]
                 and old.get("status") not in {"completed", "cancelled", "failed"}
             ):
@@ -69,16 +76,23 @@ class WorkflowGraph:
                     [old["event_id"], event.event_id],
                     reason="duplicate_assignment",
                 )
-            tasks[task] = dict(
-                parent=p.get("parent_task_id"),
-                recipient=p["recipient_id"],
-                sender=event.agent_id,
-                tools=p.get("allowed_tools", []),
-                event_id=event.event_id,
-                status="delegated",
-                deadline=p.get("deadline"),
-                waits_for=[],
-            )
+            old = old or {}
+            if not old.get("delegated_at") or event.timestamp >= datetime.fromisoformat(old["delegated_at"]):
+                updated = dict(
+                    old,
+                    parent=p.get("parent_task_id"),
+                    recipient=p["recipient_id"],
+                    sender=event.agent_id,
+                    tools=p.get("allowed_tools", []),
+                    event_id=event.event_id,
+                    deadline=p.get("deadline"),
+                    delegated_at=event.timestamp.isoformat(),
+                )
+                if not old.get("status_updated_at") or event.timestamp > datetime.fromisoformat(
+                    old["status_updated_at"]
+                ):
+                    updated.update(status="delegated", waits_for=[], status_updated_at=event.timestamp.isoformat())
+                tasks[task] = updated
             chain, current = [], task
             while current in tasks and current not in chain:
                 chain.append(current)
@@ -93,7 +107,15 @@ class WorkflowGraph:
                 )
         if event.event_type == "task.status":
             task = tasks.setdefault(p["task_id"], dict(event_id=event.event_id))
-            task.update(status=p["status"], waits_for=p.get("waits_for", []), last_event_id=event.event_id)
+            if not task.get("status_updated_at") or event.timestamp >= datetime.fromisoformat(
+                task["status_updated_at"]
+            ):
+                task.update(
+                    status=p["status"],
+                    waits_for=p.get("waits_for", []),
+                    last_event_id=event.event_id,
+                    status_updated_at=event.timestamp.isoformat(),
+                )
             if p["status"] == "completed":
                 missing = sorted(set(p.get("required_artifacts", [])) - set(p.get("artifact_ids", [])))
                 if missing or (p.get("requires_verification") and not p.get("verified")):
@@ -106,17 +128,7 @@ class WorkflowGraph:
                         verification_missing=bool(p.get("requires_verification") and not p.get("verified")),
                     )
 
-            def cycle(current, path):
-                if current in path:
-                    return path[path.index(current) :]
-                for nxt in tasks.get(current, {}).get("waits_for", []):
-                    if len(path) < 100:
-                        found = cycle(nxt, path + [current])
-                        if found:
-                            return found
-                return []
-
-            loop = cycle(p["task_id"], [])
+            loop = self.wait_cycle(tasks, p["task_id"])
             if loop:
                 emit(
                     "coordination",
@@ -160,41 +172,48 @@ class WorkflowGraph:
                         budget=self.budgets[key],
                     )
 
-        # Revisit retained actions when late source/transfer events arrive.
+        # Only descendants can acquire a new causal path, including late sources.
+        affected = self.descendants(nodes, event.event_id)
+        if event.event_type == "task.delegated":
+            affected.update(key for key, node in nodes.items() if node.get("task_id") == p["task_id"])
         candidates = [
             n
             for n in nodes.values()
-            if n["kind"]
+            if n["id"] in affected
+            and n["kind"]
             in {"action.proposed", "tool.call.start", "network.request", "artifact.transferred", "file.write"}
         ]
         emitted = state.setdefault("emitted", {})
         for sink in candidates:
-            paths = self.ancestors(nodes, sink["id"])
+            steps = self.ancestor_steps(nodes, sink["id"])
             sp = sink["payload"]
             tool = str(sp.get("tool_name") or "")
-            for source_id, path in paths.items():
+            for source_id in steps:
                 source = nodes[source_id]
                 trust = source["payload"].get("trust", "unknown")
+                if not isinstance(trust, str):
+                    trust = "unknown"
+                classification = source["payload"].get("classification")
                 injection = (
                     source["analysis"].get("injection_rules")
                     and trust not in {"trusted", "quoted"}
                     and not source["payload"].get("quoted")
                 )
-                sensitive = source["analysis"].get("sensitive_types") or source["payload"].get("classification") in {
-                    "secret",
-                    "confidential",
-                }
+                sensitive = source["analysis"].get("sensitive_types") or (
+                    isinstance(classification, str) and classification in {"secret", "confidential"}
+                )
                 outbound = sink["kind"] in {"network.request", "file.write", "artifact.transferred"} or bool(
                     sp.get("destination") or sp.get("url") or sink["analysis"].get("outbound")
                 )
                 signatures = []
                 if injection and (tool in {"shell", "http", "upload", "send", "file_write", "python_exec"} or outbound):
                     signatures.append(("injection_propagation", source_id))
-                if sensitive and outbound and not sp.get("authorized", False):
+                if sensitive and outbound and sp.get("authorized") is not True:
                     signatures.append(("data_movement", source_id))
                 for category, key in signatures:
                     dedup = category + ":" + source_id + ":" + sink["id"]
                     if dedup not in emitted:
+                        path = self.path_to_sink(steps, source_id)
                         emit(
                             category,
                             key,
@@ -208,17 +227,22 @@ class WorkflowGraph:
                             causal_path=path,
                         )
                         emitted[dedup] = True
-            if event.task_id and sink["id"] == event.event_id and event.task_id in tasks:
-                task = tasks[event.task_id]
+            if sink.get("task_id") in tasks:
+                task_id = sink["task_id"]
+                task = tasks[task_id]
                 if task.get("tools") and tool and tool not in task["tools"]:
+                    dedup = "authority:" + task["event_id"] + ":" + sink["id"]
+                    if dedup in emitted:
+                        continue
                     emit(
                         "authority",
-                        event.task_id + ":" + tool,
+                        task_id + ":" + tool,
                         "Action exceeds delegated tool authority",
-                        [task["event_id"], event.event_id],
+                        [task["event_id"], sink["id"]],
                         tool=tool,
                         allowed_tools=task["tools"],
                     )
+                    emitted[dedup] = True
         if len(emitted) > self.max_events * 2:
             for key in list(emitted)[: len(emitted) - self.max_events * 2]:
                 del emitted[key]
@@ -227,21 +251,66 @@ class WorkflowGraph:
     @staticmethod
     def summary(payload):
         """Bound graph duplication; the journal retains the complete captured payload."""
-        structural = {"trust", "quoted", "classification", "tool_name", "destination", "url", "authorized"}
-        result = {key: value for key, value in payload.items() if key in structural}
-        for key in ("content", "input", "output", "text"):
+        result = {key: payload[key] for key in ("quoted", "authorized") if isinstance(payload.get(key), bool)}
+        for key in ("content", "input", "output", "text", "trust", "classification", "tool_name", "destination", "url"):
             if isinstance(payload.get(key), str):
-                result[key] = payload[key][:256]
+                result[key] = payload[key][: 2048 if key in {"destination", "url"} else 256]
         return result
 
     @staticmethod
-    def ancestors(nodes, event_id):
-        paths = {event_id: [event_id]}
-        pending = [event_id]
+    def ancestor_steps(nodes, event_id):
+        steps = {event_id: None}
+        pending = deque([event_id])
         while pending:
-            current = pending.pop()
+            current = pending.popleft()
             for parent in nodes[current]["parents"]:
-                if parent in nodes and parent not in paths:
-                    paths[parent] = [parent] + paths[current]
+                if parent in nodes and parent not in steps:
+                    steps[parent] = current
                     pending.append(parent)
-        return paths
+        return steps
+
+    @staticmethod
+    def path_to_sink(steps, source):
+        path = []
+        while source is not None:
+            path.append(source)
+            source = steps[source]
+        return path
+
+    @classmethod
+    def ancestors(cls, nodes, event_id):
+        steps = cls.ancestor_steps(nodes, event_id)
+        return {source: cls.path_to_sink(steps, source) for source in steps}
+
+    @staticmethod
+    def descendants(nodes, event_id):
+        children = defaultdict(list)
+        for key, node in nodes.items():
+            for parent in node["parents"]:
+                children[parent].append(key)
+        found, pending = {event_id}, [event_id]
+        while pending:
+            for child in children[pending.pop()]:
+                if child not in found:
+                    found.add(child)
+                    pending.append(child)
+        return found
+
+    @staticmethod
+    def wait_cycle(tasks, start):
+        """Iterative DFS visits each reachable task/edge once, including deep DAGs."""
+        path, positions, finished = [start], {start: 0}, set()
+        stack = [iter(tasks.get(start, {}).get("waits_for", []))]
+        while stack:
+            nxt = next(stack[-1], None)
+            if nxt is None:
+                finished.add(path[-1])
+                positions.pop(path.pop())
+                stack.pop()
+            elif nxt in positions:
+                return path[positions[nxt] :]
+            elif nxt not in finished:
+                positions[nxt] = len(path)
+                path.append(nxt)
+                stack.append(iter(tasks.get(nxt, {}).get("waits_for", [])))
+        return []

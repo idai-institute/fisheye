@@ -40,7 +40,7 @@ class PromptInjectionDetector(Detector):
         run_state = context.setdefault(event.run_id, {})
 
         if event.event_type in {"llm.request", "llm.message", "tool.call.end"}:
-            if event.payload.get("quoted") or event.payload.get("trust") == "trusted":
+            if event.payload.get("quoted") is True or event.payload.get("trust") in ("trusted", "quoted"):
                 return None
             text = extract_text(event.payload)
             matches: list[str] = list(event.meta.get("_analysis", {}).get("injection_rules", []))

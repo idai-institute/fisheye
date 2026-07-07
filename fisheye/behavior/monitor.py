@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from collections import Counter, defaultdict, deque
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
@@ -32,6 +33,7 @@ class StatisticalBehaviorMonitor(Collector):
         self.rate_window = timedelta(seconds=rate_window_seconds)
         self.min_samples = min_samples
         self.frozen = frozen
+        self.invalid_measurements = 0
 
         self._tool_call_times: dict[tuple[str, str], deque[datetime]] = defaultdict(lambda: deque(maxlen=10000))
         self._event_outcomes: dict[str, deque[tuple[datetime, int]]] = defaultdict(lambda: deque(maxlen=10000))
@@ -115,6 +117,10 @@ class StatisticalBehaviorMonitor(Collector):
         try:
             latency = float(raw)
         except (TypeError, ValueError):
+            self.invalid_measurements += 1
+            return None
+        if not math.isfinite(latency) or not 0 <= latency <= 1e15:
+            self.invalid_measurements += 1
             return None
 
         tool_name = str(event.payload.get("tool_name") or "llm")
@@ -145,6 +151,10 @@ class StatisticalBehaviorMonitor(Collector):
         try:
             tokens = float(raw)
         except (TypeError, ValueError):
+            self.invalid_measurements += 1
+            return None
+        if not math.isfinite(tokens) or not 0 <= tokens <= 1e15:
+            self.invalid_measurements += 1
             return None
 
         tracker = self._token_stats[event.agent_id]

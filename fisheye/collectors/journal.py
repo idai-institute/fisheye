@@ -338,6 +338,7 @@ class JournalStore(SQLiteStore):
             tasks=graph.get("tasks", {}),
             usage=graph.get("usage", {}),
             truncated=graph.get("truncated", False),
+            invalid_relationships=graph.get("invalid_relationships", 0),
         )
 
     async def prune(self, retention_days=30, state_ttl_seconds=86400, now=None):

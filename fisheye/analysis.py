@@ -146,6 +146,7 @@ class AnalysisProcessor:
         for key, value in state.get("behavior", {}).items():
             getattr(monitor, key).update(value)
         await monitor.handle_event(event)
+        self.coverage["behavioral"] = "insufficient_input" if monitor.invalid_measurements else "evaluated"
         state["behavior"] = {k: dict(v) for k, v in vars(monitor).items() if k.startswith("_") and isinstance(v, dict)}
         for i, alert in enumerate(sink.alerts):
             alert.alert_id = hashlib.sha256(f"{event.event_id}:behavior:{i}".encode()).hexdigest()[:32]
