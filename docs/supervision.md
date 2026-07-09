@@ -40,6 +40,8 @@ Approved actions reserve estimates atomically. Pending reviews reserve nothing; 
 
 A changed policy has a different version and invalidates old approvals. A reviewed action can still be denied at execution if a new blocking finding or overrun appears. Denied actions need a new proposal.
 
+Policy collections are immutable. Malformed URLs, invalid ports, and control characters produce `invalid_destination` denials. Proposal evaluation checks current findings in the same database transaction as reservation. Expiring an approval/review persists its state and records one audit transition, including when a subsequent review attempt is rejected.
+
 ## Human review and recovery
 
 Start the dashboard with `fisheye --config examples/local.toml serve --policy examples/review-policy.json`. Configure separate API and reviewer keys. HTTP mutations use `X-Review-Key`, map to policy reviewer `operator`, and are audited. CLI review relies on the local operator's trusted database access:

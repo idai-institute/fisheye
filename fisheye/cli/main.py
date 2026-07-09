@@ -46,11 +46,20 @@ def _parser():
     policy.add_argument("operation", choices=["validate"])
     policy.add_argument("path")
     reviews = sub.add_parser("reviews", help="List or decide persistent reviews")
-    reviews.add_argument("operation", choices=["list", "approve", "deny"])
+    reviews.add_argument("operation", choices=["list", "show", "approve", "deny"])
     reviews.add_argument("--policy", required=True)
     reviews.add_argument("--action-id")
     reviews.add_argument("--digest")
     reviews.add_argument("--reviewer", default="operator")
+    reviews.add_argument("--limit", type=int, default=100)
+    reviews.add_argument("--offset", type=int, default=0)
+    reviews.add_argument(
+        "--status",
+        default="pending",
+        choices=["pending", "approved", "denied", "expired", "executing", "completed", "failed", "unknown"],
+    )
+    reviews.add_argument("--workflow-id")
+    reviews.add_argument("--environment", default="local")
     for name in ("alerts", "runs", "detectors"):
         p = sub.add_parser(name)
         p.add_argument("operation", choices=["list", "tail"] if name == "alerts" else ["list"])
@@ -177,7 +186,23 @@ async def _run(args, cfg):
             policy = Policy.model_validate_json(Path(args.policy).read_text())
             supervisor = Supervisor(store, policy)
             if args.operation == "list":
-                _output(await supervisor.list_reviews())
+                scope = (
+                    json.dumps([cfg.api.application_id, args.environment, args.workflow_id], separators=(",", ":"))
+                    if args.workflow_id
+                    else None
+                )
+                _output(
+                    await supervisor.list_reviews(
+                        args.status, args.limit, args.offset, application_id=cfg.api.application_id, scope=scope
+                    )
+                )
+            elif args.operation == "show":
+                if not args.action_id:
+                    raise ValueError("--action-id is required")
+                review = await supervisor.get_review(args.action_id, cfg.api.application_id)
+                if review is None:
+                    raise ValueError("Review not found")
+                _output(review)
             else:
                 if not args.action_id or not args.digest:
                     raise ValueError("--action-id and --digest are required")

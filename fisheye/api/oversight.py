@@ -72,26 +72,40 @@ def register_oversight_routes(app, runtime, auth):
             raise HTTPException(404, "Finding not found") from exc
 
     @app.get("/v2/reviews", dependencies=[Depends(auth)])
-    async def reviews():
+    async def reviews(
+        limit: int = Query(100, ge=1, le=1000),
+        offset: int = Query(0, ge=0),
+        status: Literal[
+            "pending", "approved", "denied", "expired", "executing", "completed", "failed", "unknown"
+        ] = "pending",
+        workflow_id: str | None = None,
+        environment: str = "local",
+    ):
         supervisor = getattr(runtime, "supervisor", None)
         if supervisor is None:
             return []
-        return [
-            r
-            for r in await supervisor.list_reviews()
-            if r["action"]["application_id"] == runtime.config.api.application_id
-        ]
+        return await supervisor.list_reviews(
+            status,
+            limit,
+            offset,
+            application_id=runtime.config.api.application_id,
+            scope=scope(workflow_id, environment) if workflow_id is not None else None,
+        )
+
+    @app.get("/v2/reviews/{action_id}", dependencies=[Depends(auth)])
+    async def review_detail(action_id: str):
+        supervisor = getattr(runtime, "supervisor", None)
+        review = await supervisor.get_review(action_id, runtime.config.api.application_id) if supervisor else None
+        if review is None:
+            raise HTTPException(404, "Review not found")
+        return review
 
     @app.post("/v2/reviews/{action_id}", dependencies=[Depends(auth)])
     async def decide(action_id: str, body: ReviewBody, actor: str = Depends(reviewer)):
         supervisor = getattr(runtime, "supervisor", None)
         if supervisor is None:
             raise HTTPException(409, "Supervision is not configured")
-        visible = await supervisor.list_reviews(limit=1000)
-        if not any(
-            r["action_id"] == action_id and r["action"]["application_id"] == runtime.config.api.application_id
-            for r in visible
-        ):
+        if await supervisor.get_review(action_id, runtime.config.api.application_id) is None:
             raise HTTPException(404, "Review not found")
         try:
             return (await supervisor.review_id(action_id, body.action_digest, body.approve, actor)).model_dump(

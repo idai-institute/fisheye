@@ -49,18 +49,18 @@ class Action(BaseModel):
 class Policy(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
     name: str = "default"
-    allowed_tools: set[str] | None = None
-    denied_tools: set[str] = Field(default_factory=set)
-    review_tools: set[str] = Field(default_factory=set)
-    allowed_destinations: set[str] | None = None
+    allowed_tools: frozenset[str] | None = None
+    denied_tools: frozenset[str] = Field(default_factory=frozenset)
+    review_tools: frozenset[str] = Field(default_factory=frozenset)
+    allowed_destinations: frozenset[str] | None = None
     deny_sensitive_egress: bool = True
     max_delegation_depth: int = Field(default=5, ge=0)
     max_cost: float = Field(default=100, gt=0, allow_inf_nan=False)
     max_tokens: int = Field(default=100000, gt=0)
     max_calls: int = Field(default=1000, gt=0)
     approval_ttl_seconds: int = Field(default=300, ge=1, le=86400)
-    reviewers: set[str] = Field(default_factory=lambda: {"operator"})
-    blocked_finding_categories: set[str] = Field(default_factory=set)
+    reviewers: frozenset[str] = Field(default_factory=lambda: frozenset({"operator"}))
+    blocked_finding_categories: frozenset[str] = Field(default_factory=frozenset)
 
     @property
     def version(self):
@@ -77,11 +77,22 @@ class Policy(BaseModel):
             return "deny", "tool_not_allowed"
         if action.delegation_depth > self.max_delegation_depth:
             return "deny", "delegation_depth"
-        if action.destination:
-            target = urlsplit(action.destination)
-            if target.scheme not in {"https", "http"} or not target.hostname or target.username or target.password:
+        if action.destination is not None:
+            try:
+                if any(ord(char) <= 32 or ord(char) == 127 for char in action.destination):
+                    return "deny", "invalid_destination"
+                target = urlsplit(action.destination)
+                if (
+                    target.scheme not in {"https", "http"}
+                    or not target.hostname
+                    or target.username
+                    or target.password
+                    or (target.port is not None and target.port < 1)
+                ):
+                    return "deny", "invalid_destination"
+                host = target.hostname.rstrip(".").encode("idna").decode().lower()
+            except (ValueError, UnicodeError):
                 return "deny", "invalid_destination"
-            host = target.hostname.rstrip(".").encode("idna").decode().lower()
             if self.allowed_destinations is not None and host not in {
                 h.rstrip(".").encode("idna").decode().lower() for h in self.allowed_destinations
             }:

@@ -27,13 +27,15 @@ Data endpoints and dashboards require the configured API credential. `/v1/health
 | `GET /v2/workflows/{id}/events` | Captured events with `after` sequence cursor |
 | `GET /v2/findings?workflow_id=...` | Findings with status/limit/offset |
 | `PATCH /v2/findings/{id}` | Set lifecycle status; requires reviewer credential |
-| `GET /v2/reviews`, `POST /v2/reviews/{id}` | List pending reviews or decide an exact action digest |
+| `GET /v2/reviews`, `GET /v2/reviews/{id}`, `POST /v2/reviews/{id}` | Page through scoped reviews, inspect one action, or decide its exact digest |
 | `GET /v2/health` | Journal backlog, coverage, errors, consumer metrics and config hash |
 | `GET /`, `/dashboard`, `/workflows/{id}` | Investigation UI |
 
 Workflow queries accept `environment`, defaulting to `local`. Remote application and producer IDs are bound to server configuration. Internal detector annotations supplied by remote producers are discarded. An event is limited to 256 KiB; request bodies default to 2 MiB. Invalid input returns 422, oversized requests 413, identity conflicts 409, and backlog overload 429. A 409/429 may include earlier accepted receipts. A 202 still acknowledges acceptance and indicates processing is pending/degraded.
 
 Finding mutations accept `{"status":"resolved"}` (also `open`, `acknowledged`, `false_positive`). Reviews accept `{"action_digest":"...","approve":true}`. Both require `X-Review-Key` as well as API authentication when configured. Review routes require a runtime supervisor or CLI `serve --policy ...`.
+
+Review lists accept `limit`, `offset`, `status`, and optional `workflow_id`/`environment`. Application and workflow filters are applied before pagination. A direct action lookup remains available even when the item is beyond the current inbox page. CLI equivalents are `reviews list --limit 50 --offset 50 --status pending` and `reviews show --action-id ID`, with the usual `--policy` argument. CLI reads use the configured application scope. Expired reviews remain inspectable under `status=expired`; attempting to approve a stale review returns 409.
 
 ## Backup, export and retention
 

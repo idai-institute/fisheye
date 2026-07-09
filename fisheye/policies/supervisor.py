@@ -29,6 +29,8 @@ class Supervisor:
                     result_json TEXT, reviewer TEXT
                 );
                 CREATE INDEX IF NOT EXISTS idx_actions_scope ON actions(scope,status);
+                CREATE INDEX IF NOT EXISTS idx_actions_inbox ON actions(json_extract(scope,'$[0]'),status,created_at,action_id);
+                CREATE INDEX IF NOT EXISTS idx_actions_expiry ON actions(status,expires_at);
                 CREATE TABLE IF NOT EXISTS policies (version TEXT PRIMARY KEY, data_json TEXT NOT NULL);
             """)
             store._conn.execute(
@@ -44,10 +46,16 @@ class Supervisor:
         )
 
     def _expire(self):
+        expired = self.store._conn.execute(
+            "SELECT action_id FROM actions WHERE status IN ('approved','pending') AND expires_at<=?",
+            (self.clock().isoformat(),),
+        ).fetchall()
         self.store._conn.execute(
             "UPDATE actions SET status='expired',reason='expired' WHERE status IN ('approved','pending') AND expires_at<=?",
             (self.clock().isoformat(),),
         )
+        for row in expired:
+            self._audit("system", "action.expired", {"action_id": row["action_id"]})
 
     def _budget_available(self, action, exclude=None):
         row = self.store._conn.execute(
@@ -84,7 +92,6 @@ class Supervisor:
     async def propose(self, action: Action):
         # Copy the nested arguments so callers cannot mutate the approval input.
         action = Action.model_validate(action.model_dump(mode="json"))
-        findings = []
         if self.runtime:
             await self.runtime.publish(
                 dict(
@@ -108,8 +115,6 @@ class Supervisor:
                 )
             )
             await self.runtime.drain(10)
-            findings = await self.store.list_findings(scope=action.scope, limit=1000)
-        choice, reason = self.policy.evaluate(action, findings)
 
         def persist():
             with self.store._lock:
@@ -123,7 +128,7 @@ class Supervisor:
                             raise ActionDenied("Action ID or policy changed")
                         conn.commit()
                         return self._decision(existing)
-                    decision, why = choice, reason
+                    decision, why = self.policy.evaluate(action, self._active_findings(action.scope))
                     if decision == "allow" and not self._budget_available(action):
                         decision, why = "deny", "budget_exhausted"
                     status = {"allow": "approved", "deny": "denied", "require_review": "pending"}[decision]
@@ -179,6 +184,7 @@ class Supervisor:
                         or row["digest"] != action_digest
                         or row["policy_version"] != self.policy.version
                     ):
+                        conn.commit()
                         raise ActionDenied("Review is stale, expired, or action has changed")
                     action = Action.model_validate_json(row["action_json"])
                     allowed = (
@@ -290,18 +296,50 @@ class Supervisor:
                 )
             )
 
-    async def list_reviews(self, status="pending", limit=100):
+    async def _expire_reviews(self):
         def expire():
             with self.store._lock, self.store._conn:
+                self.store._conn.execute("BEGIN IMMEDIATE")
                 self._expire()
 
         await asyncio.to_thread(expire)
-        rows = await asyncio.to_thread(
-            self.store._query, "SELECT * FROM actions WHERE status=? ORDER BY created_at LIMIT ?", (status, limit)
+
+    @staticmethod
+    def _review_data(row):
+        return dict(
+            Supervisor._decision(row).model_dump(mode="json"),
+            action=json.loads(row["action_json"]),
+            result=json.loads(row["result_json"]) if row["result_json"] else None,
         )
-        return [
-            dict(self._decision(row).model_dump(mode="json"), action=json.loads(row["action_json"])) for row in rows
-        ]
+
+    async def get_review(self, action_id, application_id=None):
+        await self._expire_reviews()
+        where, args = "action_id=?", [action_id]
+        if application_id is not None:
+            where += " AND json_extract(scope,'$[0]')=?"
+            args.append(application_id)
+        rows = await asyncio.to_thread(self.store._query, "SELECT * FROM actions WHERE " + where, tuple(args))
+        return self._review_data(rows[0]) if rows else None
+
+    async def list_reviews(self, status="pending", limit=100, offset=0, application_id=None, scope=None):
+        if not 1 <= limit <= 1000 or offset < 0:
+            raise ValueError("Review pagination requires limit 1..1000 and nonnegative offset")
+        if status not in {"pending", "approved", "denied", "expired", "executing", "completed", "failed", "unknown"}:
+            raise ValueError("Invalid action status")
+        await self._expire_reviews()
+        terms, args = ["status=?"], [status]
+        if application_id is not None:
+            terms.append("json_extract(scope,'$[0]')=?")
+            args.append(application_id)
+        if scope is not None:
+            terms.append("scope=?")
+            args.append(scope)
+        rows = await asyncio.to_thread(
+            self.store._query,
+            "SELECT * FROM actions WHERE " + " AND ".join(terms) + " ORDER BY created_at,action_id LIMIT ? OFFSET ?",
+            tuple(args + [limit, offset]),
+        )
+        return [self._review_data(row) for row in rows]
 
     async def record_usage(self, action_id: str, *, cost: float, tokens: int):
         """Reconcile a terminal action using usage measured by the trusted host."""

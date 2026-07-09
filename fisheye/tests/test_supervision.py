@@ -78,6 +78,17 @@ def test_destination_matching_is_exact_and_sensitive_egress_denied():
     for url in ["https://trusted.example.evil.test", "https://trusted.example@evil.test", "file:///tmp/exfil"]:
         assert policy.evaluate(action(destination=url))[0] == "deny"
     assert policy.evaluate(action(destination="https://trusted.example", classification="secret"))[0] == "deny"
+    for url in [
+        "",
+        "http://[",
+        "https://trusted.example:bad",
+        "https://trusted.example:99999",
+        "https://trusted.example:0",
+        "https://trusted.example\n/hidden",
+    ]:
+        assert policy.evaluate(action(destination=url)) == ("deny", "invalid_destination")
+    with pytest.raises(AttributeError):
+        policy.allowed_destinations.add("unreviewed.example")
 
 
 def test_two_connections_cannot_execute_same_approval_and_usage_reconciles(tmp_path):
@@ -97,6 +108,24 @@ def test_two_connections_cannot_execute_same_approval_and_usage_reconciles(tmp_p
         assert (await supervisors[1].propose(action(estimated_cost=1))).decision == "deny"
         for store in stores:
             store.close()
+
+    asyncio.run(run())
+
+
+def test_expired_review_decision_is_persisted_and_audited_once(tmp_path):
+    async def run():
+        now = datetime.now(timezone.utc)
+        store = JournalStore(tmp_path / "expiry.db")
+        supervisor = Supervisor(store, Policy(review_tools={"send"}, approval_ttl_seconds=1), clock=lambda: now)
+        a = action()
+        await supervisor.propose(a)
+        now += timedelta(seconds=2)
+        with pytest.raises(ActionDenied):
+            await supervisor.review(a, True, "operator")
+        assert (await supervisor.get_review(a.action_id))["status"] == "expired"
+        await supervisor.list_reviews(status="expired")
+        assert len(store._query("SELECT * FROM audit WHERE operation='action.expired'")) == 1
+        store.close()
 
     asyncio.run(run())
 

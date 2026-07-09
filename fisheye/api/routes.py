@@ -130,15 +130,7 @@ def register_routes(app: FastAPI, runtime: Any, api_key: str | None = None) -> N
         runs = await runtime.store.scoped_runs(runtime.config.api.application_id, limit=30)
         workflows = await runtime.store.list_workflows(runtime.config.api.application_id)
         supervisor = getattr(runtime, "supervisor", None)
-        reviews = (
-            [
-                r
-                for r in await supervisor.list_reviews()
-                if r["action"]["application_id"] == runtime.config.api.application_id
-            ]
-            if supervisor
-            else []
-        )
+        reviews = await supervisor.list_reviews(application_id=runtime.config.api.application_id) if supervisor else []
         return render_dashboard(alerts, runs, workflows, reviews)
 
     from fisheye.api.oversight import register_oversight_routes
