@@ -9,6 +9,7 @@ from fisheye.collectors.base import AlertSink, Collector
 from fisheye.privacy import redact
 from fisheye.schema.alerts import Alert
 from fisheye.schema.events import EventEnvelope
+from fisheye.schema.serialization import json_safe
 
 
 class JsonlLoggerCollector(Collector, AlertSink):
@@ -32,7 +33,13 @@ class JsonlLoggerCollector(Collector, AlertSink):
 
     async def _write_line(self, path: Path, payload: dict) -> None:
         line = (
-            json.dumps(redact(payload) if self.redact_content else payload, default=str, separators=(",", ":")) + "\n"
+            json.dumps(
+                redact(payload) if self.redact_content else payload,
+                default=json_safe,
+                allow_nan=False,
+                separators=(",", ":"),
+            )
+            + "\n"
         )
         async with self._lock:
             await asyncio.to_thread(self._rotate_if_needed, path)
@@ -59,7 +66,9 @@ class JsonlLoggerCollector(Collector, AlertSink):
             path = self.events_path if item["kind"] == "event" else self.alerts_path
             if path is not None:
                 payload = json.loads(item["data_json"])
-                line = json.dumps(redact(payload) if self.redact_content else payload, separators=(",", ":"))
+                line = json.dumps(
+                    redact(payload) if self.redact_content else payload, allow_nan=False, separators=(",", ":")
+                )
                 streams.setdefault(path, []).append(line + "\n")
         async with self._lock:
 

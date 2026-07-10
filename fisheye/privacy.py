@@ -6,6 +6,7 @@ import re
 from typing import Any
 
 from fisheye.preprocessors.redaction import PIIRedactionPreprocessor, SecretRedactionPreprocessor
+from fisheye.schema.serialization import json_safe
 
 _PATTERNS = (
     *SecretRedactionPreprocessor.patterns,
@@ -26,7 +27,11 @@ def redact(value: Any) -> Any:
         return {redact(str(k)): "[REDACTED]" if _SENSITIVE_KEYS.match(str(k)) else redact(v) for k, v in value.items()}
     if isinstance(value, (tuple, list)):
         return [redact(v) for v in value]
-    return value
+    if value is None or isinstance(value, (bool, int, float)):
+        return value
+    # Normalize structured values before scanning them. Never leak an arbitrary
+    # object's repr through a serializer's default=str fallback.
+    return redact(json_safe(value))
 
 
 def capture_event(event, raw=False, feature_only=False):

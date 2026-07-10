@@ -55,4 +55,6 @@ Approving changes durable state; it does not invoke a tool in the dashboard/CLI 
 
 Cancellation records an unknown outcome. A process crash may leave an action `executing`; its external effect may already have happened. Fisheye never automatically retries it. Inspect the external system and use application-specific reconciliation. Exactly-once external effects require tool-level idempotency or transactional support.
 
+Captured results normalize structured objects before redaction. Unknown object types are represented by type metadata rather than private string representations. If a result cannot be captured as finite JSON, the action still records its actual terminal status with a `capture_error` type, and the caller receives the original result. A telemetry formatting failure does not make a completed tool eligible to run again. Review detail queries expose the captured result/diagnostic using the same application authorization as the action.
+
 This boundary protects only tools executed through it. Native callbacks, code outside the registry, and direct network/filesystem access remain under host control. Observation does not imply enforced pause, cancellation, or sandboxing.

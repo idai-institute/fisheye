@@ -272,11 +272,16 @@ class Supervisor:
         return result
 
     async def _finish(self, action, status, result):
+        try:
+            captured = self.store._json(result)
+        except Exception as exc:
+            captured = self.store._json({"capture_error": type(exc).__name__})
+
         def finish():
             with self.store._lock, self.store._conn:
                 self.store._conn.execute(
                     "UPDATE actions SET status=?,result_json=? WHERE action_id=?",
-                    (status, self.store._json(result), action.action_id),
+                    (status, captured, action.action_id),
                 )
                 self._audit(action.agent_id, "action." + status, dict(action_id=action.action_id))
 

@@ -13,6 +13,7 @@ from fisheye.detectors.base import DetectorSignal
 from fisheye.privacy import redact
 from fisheye.schema.alerts import Alert
 from fisheye.schema.events import EventEnvelope
+from fisheye.schema.serialization import json_safe
 
 
 @dataclass(slots=True)
@@ -121,7 +122,10 @@ class SQLiteStore(Collector, AlertSink):
 
     def _json(self, data: Any) -> str:
         return json.dumps(
-            data if getattr(self, "raw_capture", False) else redact(data), default=str, separators=(",", ":")
+            data if getattr(self, "raw_capture", False) else redact(data),
+            default=json_safe,
+            allow_nan=False,
+            separators=(",", ":"),
         )
 
     @staticmethod
