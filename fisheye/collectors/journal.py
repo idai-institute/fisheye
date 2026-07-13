@@ -242,6 +242,16 @@ class JournalStore(SQLiteStore):
         )
         return [dict(sequence=r["sequence"], event=json.loads(r["event_json"])) for r in rows]
 
+    async def get_event(self, event_id, application_id=None):
+        where, args = "event_id=?", [event_id]
+        if application_id is not None:
+            where += " AND json_extract(scope,'$[0]')=?"
+            args.append(application_id)
+        rows = await asyncio.to_thread(
+            self._query, "SELECT sequence,event_json FROM journal WHERE " + where, tuple(args)
+        )
+        return dict(sequence=rows[0]["sequence"], event=json.loads(rows[0]["event_json"])) if rows else None
+
     async def list_findings(self, scope=None, status=None, limit=100, offset=0):
         terms, args = [], []
         for field, value in [("scope", scope), ("status", status)]:
@@ -327,7 +337,7 @@ class JournalStore(SQLiteStore):
     async def workflow_graph(self, scope):
         checkpoint = await self.checkpoint(scope)
         if checkpoint is None:
-            return dict(nodes=[], edges=[], tasks={}, usage={}, truncated=False)
+            return dict(nodes=[], edges=[], tasks={}, usage={}, truncated=False, invalid_relationships=0)
         from fisheye.state.codec import decode
 
         graph = decode(checkpoint["data"]).get("graph", {})

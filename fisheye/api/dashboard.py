@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 from pathlib import Path
 from typing import Any
 
@@ -12,10 +13,23 @@ _ENV = Environment(
 )
 
 
+def event_anchor(event_id):
+    return "event-" + hashlib.sha256(str(event_id).encode()).hexdigest()[:24]
+
+
+_ENV.filters["event_anchor"] = event_anchor
+
+
 def render_dashboard(alerts: list[dict[str, Any]], runs: list[dict[str, Any]], workflows=None, reviews=None) -> str:
     template = _ENV.get_template("dashboard.html")
     return template.render(alerts=alerts, runs=runs, workflows=workflows or [], reviews=reviews or [])
 
 
 def render_investigation(workflow_id, graph, findings):
-    return _ENV.get_template("investigation.html").render(workflow_id=workflow_id, graph=graph, findings=findings)
+    display = dict(graph, nodes=[dict(node, anchor=event_anchor(node["id"])) for node in graph["nodes"]])
+    return _ENV.get_template("investigation.html").render(
+        workflow_id=workflow_id,
+        graph=display,
+        findings=findings,
+        visible_event_ids={node["id"] for node in graph["nodes"]},
+    )

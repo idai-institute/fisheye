@@ -37,11 +37,11 @@ def register_oversight_routes(app, runtime, auth):
     async def workflows(limit: int = Query(100, ge=1, le=1000), offset: int = Query(0, ge=0)):
         return await runtime.store.list_workflows(runtime.config.api.application_id, limit, offset)
 
-    @app.get("/v2/workflows/{workflow_id}/graph", dependencies=[Depends(auth)])
+    @app.get("/v2/workflows/{workflow_id:path}/graph", dependencies=[Depends(auth)])
     async def graph(workflow_id: str, environment: str = "local"):
         return await runtime.store.workflow_graph(scope(workflow_id, environment))
 
-    @app.get("/v2/workflows/{workflow_id}/events", dependencies=[Depends(auth)])
+    @app.get("/v2/workflows/{workflow_id:path}/events", dependencies=[Depends(auth)])
     async def events(
         workflow_id: str,
         environment: str = "local",
@@ -50,6 +50,13 @@ def register_oversight_routes(app, runtime, auth):
     ):
         rows = await runtime.store.journal_events(scope(workflow_id, environment), after, limit)
         return dict(items=rows, next_cursor=rows[-1]["sequence"] if rows else None)
+
+    @app.get("/v2/events/{event_id:path}", dependencies=[Depends(auth)])
+    async def event_detail(event_id: str):
+        record = await runtime.store.get_event(event_id, runtime.config.api.application_id)
+        if record is None:
+            raise HTTPException(404, "Event not found")
+        return record
 
     @app.get("/v2/findings", dependencies=[Depends(auth)])
     async def findings(
@@ -61,7 +68,7 @@ def register_oversight_routes(app, runtime, auth):
     ):
         return await runtime.store.list_findings(scope(workflow_id, environment), status, limit, offset)
 
-    @app.patch("/v2/findings/{finding_id}", dependencies=[Depends(auth)])
+    @app.patch("/v2/findings/{finding_id:path}", dependencies=[Depends(auth)])
     async def update_finding(finding_id: str, body: FindingBody, actor: str = Depends(reviewer)):
         finding = await runtime.store.get_finding(finding_id)
         if not finding or finding["application_id"] != runtime.config.api.application_id:
@@ -92,7 +99,7 @@ def register_oversight_routes(app, runtime, auth):
             scope=scope(workflow_id, environment) if workflow_id is not None else None,
         )
 
-    @app.get("/v2/reviews/{action_id}", dependencies=[Depends(auth)])
+    @app.get("/v2/reviews/{action_id:path}", dependencies=[Depends(auth)])
     async def review_detail(action_id: str):
         supervisor = getattr(runtime, "supervisor", None)
         review = await supervisor.get_review(action_id, runtime.config.api.application_id) if supervisor else None
@@ -100,7 +107,7 @@ def register_oversight_routes(app, runtime, auth):
             raise HTTPException(404, "Review not found")
         return review
 
-    @app.post("/v2/reviews/{action_id}", dependencies=[Depends(auth)])
+    @app.post("/v2/reviews/{action_id:path}", dependencies=[Depends(auth)])
     async def decide(action_id: str, body: ReviewBody, actor: str = Depends(reviewer)):
         supervisor = getattr(runtime, "supervisor", None)
         if supervisor is None:
@@ -124,7 +131,7 @@ def register_oversight_routes(app, runtime, auth):
             config_version=runtime.config.fingerprint,
         )
 
-    @app.get("/workflows/{workflow_id}", response_class=HTMLResponse, dependencies=[Depends(auth)])
+    @app.get("/workflows/{workflow_id:path}", response_class=HTMLResponse, dependencies=[Depends(auth)])
     async def investigation(workflow_id: str, environment: str = "local"):
         key = scope(workflow_id, environment)
         graph = await runtime.store.workflow_graph(key)

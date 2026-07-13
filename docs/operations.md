@@ -25,6 +25,7 @@ Data endpoints and dashboards require the configured API credential. `/v1/health
 | `GET /v2/workflows` | Workflow list with limit/offset |
 | `GET /v2/workflows/{id}/graph` | Bounded graph, tasks and usage |
 | `GET /v2/workflows/{id}/events` | Captured events with `after` sequence cursor |
+| `GET /v2/events/{id}` | Retrieve one retained event by its exact identity |
 | `GET /v2/findings?workflow_id=...` | Findings with status/limit/offset |
 | `PATCH /v2/findings/{id}` | Set lifecycle status; requires reviewer credential |
 | `GET /v2/reviews`, `GET /v2/reviews/{id}`, `POST /v2/reviews/{id}` | Page through scoped reviews, inspect one action, or decide its exact digest |
@@ -32,6 +33,8 @@ Data endpoints and dashboards require the configured API credential. `/v1/health
 | `GET /`, `/dashboard`, `/workflows/{id}` | Investigation UI |
 
 Workflow queries accept `environment`, defaulting to `local`. Remote application and producer IDs are bound to server configuration. Internal detector annotations supplied by remote producers are discarded. An event is limited to 256 KiB; request bodies default to 2 MiB. Invalid input returns 422, oversized requests 413, identity conflicts 409, and backlog overload 429. A 409/429 may include earlier accepted receipts. A 202 still acknowledges acceptance and indicates processing is pending/degraded.
+
+Workflow and event identities may contain slashes, spaces, or URL-reserved characters; URL-encode identities when building links. Investigation evidence links jump to the visible timeline entry or retrieve the captured event when it is outside the retained graph. Event lookup uses the same application scope and authentication as workflow queries. Pruned events return 404; a finding's evidence summary remains available.
 
 Finding mutations accept `{"status":"resolved"}` (also `open`, `acknowledged`, `false_positive`). Reviews accept `{"action_digest":"...","approve":true}`. Both require `X-Review-Key` as well as API authentication when configured. Review routes require a runtime supervisor or CLI `serve --policy ...`.
 
