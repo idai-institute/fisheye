@@ -87,3 +87,20 @@ def test_bounded_evidence_preserves_current_causal_path_and_agents():
     assert merged.event_ids[-3:] == ["source", "transfer", "action"]
     assert merged.agent_ids == ["executor", "researcher"]
     assert len(old.event_ids) == 200 and old.occurrences == 1
+
+
+def test_first_observation_also_bounds_evidence_and_agent_identities():
+    finding = Finding(
+        finding_id="large-cycle",
+        workflow_id="w",
+        category="coordination",
+        score=0.9,
+        title="Large cycle",
+        event_ids=[f"event-{i}" for i in range(250)],
+        agent_ids=[f"agent-{i}" for i in range(250)],
+    )
+    result = merge_finding(None, finding)
+    assert result.event_ids == finding.event_ids[-200:]
+    assert result.agent_ids == sorted(finding.agent_ids[-200:])
+    assert result.evidence_truncated and result.occurrences == 1
+    assert len(finding.event_ids) == 250 and not finding.evidence_truncated
