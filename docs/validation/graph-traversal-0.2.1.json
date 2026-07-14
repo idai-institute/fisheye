@@ -1,0 +1,24 @@
+{
+  "workload": "Linked read-tool starts in one workflow; graph only, no journal, detectors, exports or event validation",
+  "python": "3.12.13",
+  "platform": "Linux",
+  "architecture": "aarch64",
+  "implementation_revision": "0cbe883f0b0202b4a53272d23767d00c8158460e",
+  "events": 150,
+  "samples": 3,
+  "seconds": {
+    "updated": [
+      0.014201,
+      0.012356,
+      0.012163
+    ],
+    "baseline": [
+      0.506197,
+      0.507597,
+      0.509569
+    ]
+  },
+  "baseline_revision": "f5b609efe95b53aeceff68c17ce65855d6793874",
+  "baseline_scope": "Historical graph module with the current event and finding schemas",
+  "median_speedup": 41.08
+}

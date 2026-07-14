@@ -16,6 +16,12 @@ Timing begins immediately before publication, includes acceptance, and ends afte
 
 For [100 policy proposals](validation/policy-latency.json), deterministic policy evaluation p95 was 0.006 ms; full durable proposal p95 was 58.096 ms. The latter includes journal processing, export drain, and decision auditing. No external tools were executed. These measurements deliberately exclude model judges, human waiting, remote services, and tool execution.
 
+## Graph traversal in 0.2.1
+
+The graph now revisits only affected descendant actions and builds ancestor paths on demand. Wait-cycle detection also visits each dependency once instead of repeatedly traversing shared branches.
+
+The [graph-only probe](validation/graph-traversal-0.2.1.json) processes 150 linked read-tool starts in one workflow. Three local samples had median elapsed times of 0.508 seconds for the `f5b609e` graph module and 0.0124 seconds for `0cbe883`, approximately 41 times faster on this specific workload. Both modules use the current event/finding schemas and produce no findings for the benign chain. Event construction, SQLite, detectors, checkpoint serialization, exports, and consumers are excluded. This is a microbenchmark; it does not establish a corresponding gain in application throughput or certify the sustained-load target.
+
 ## Reproduce
 
 ```bash
@@ -23,10 +29,13 @@ python tools/benchmark.py --events 1000 --output single.json
 python tools/benchmark.py --events 1000 --batch-size 100 --output batch.json
 python tools/benchmark.py --events 3000 --rate 50 --output paced.json
 python tools/benchmark_policy.py --actions 100 --output policy.json
+python tools/benchmark_graph.py --baseline f5b609e --events 150 --samples 3 --output graph.json
 fisheye evaluate --split all --output evaluation.json
 ```
 
 `--workflow-size`, `--rate`, `--batch-size`, and `--timeout` expose the workload. A rate is the offered schedule, not a guarantee that the producer maintains it. Benchmark output includes actual admission/completion time and throughput. All data is created in a temporary directory and removed after the run.
+
+Run the graph probe from a Git checkout. Its optional `--baseline` loads that revision's graph module, so use a trusted local revision. The report identifies both revisions and records each sample; omitting the baseline measures only the current graph.
 
 ## Detection regression corpus
 
@@ -38,4 +47,4 @@ All seven match their assessed categories. For injection propagation there are t
 
 The design's 1,000 events/s for 30 minutes target is **not met or certified** by these results. A 24-hour wall-clock soak has **not been run**. The current tests cover bounded histories, expiry, retention, restart, duplicate delivery, rollback, and a process exit during a projection transaction; those checks do not substitute for a long-duration soak.
 
-Next scaling work should profile large single-workflow checkpoints and repeated graph traversal, move incremental graph projections out of checkpoint snapshots, establish a persistent-storage reference machine, and run sustained backlog/retention tests. Expand the independently labeled corpus and native streaming/handoff/cancellation coverage before broadening the supported deployment claim.
+Next scaling work should profile large single-workflow checkpoints and the remaining full-state scans, move incremental graph projections out of checkpoint snapshots, establish a persistent-storage reference machine, and run sustained backlog/retention tests. Expand the independently labeled corpus and native streaming/handoff/cancellation coverage before broadening the supported deployment claim.
