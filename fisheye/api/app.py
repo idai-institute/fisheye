@@ -22,7 +22,7 @@ def create_app(runtime: FisheyeRuntime | None = None, config: FisheyeConfig | No
         finally:
             await runtime.aclose()
 
-    app = FastAPI(title="fisheye", version="0.2.0", lifespan=lifespan)
+    app = FastAPI(title="fisheye", version="0.2.1", lifespan=lifespan)
 
     @app.middleware("http")
     async def bound_request(request, call_next):

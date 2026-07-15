@@ -2,7 +2,7 @@
 
 Fisheye observes cooperating agents, connects their actions to source evidence, and optionally gates tool execution through explicit policies. It runs locally as a Python library, with a SQLite journal, an investigation dashboard, and offline replay. Python 3.10+ is required.
 
-Version 0.2 adds durable event acceptance, workflow graphs, correlated findings, shared budgets, persistent human reviews, and native framework bridges. See [release notes](docs/release-notes.md) for verification results and remaining limits.
+Version 0.2 adds durable event acceptance, workflow graphs, correlated findings, shared budgets, persistent human reviews, and native framework bridges. Version 0.2.1 improves runtime recovery, replay consistency, graph traversal, review queries, and result capture. See [release notes](docs/release-notes.md) for verification results and remaining limits.
 
 ## Run a complete local example
 
