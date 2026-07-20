@@ -104,3 +104,31 @@ def test_first_observation_also_bounds_evidence_and_agent_identities():
     assert result.agent_ids == sorted(finding.agent_ids[-200:])
     assert result.evidence_truncated and result.occurrences == 1
     assert len(finding.event_ids) == 250 and not finding.evidence_truncated
+
+
+def test_first_large_finding_is_bounded_identically_in_journal_and_replay(tmp_path):
+    class LargeEvidence(Always):
+        async def analyze(self, event, context):
+            return DetectorSignal(
+                detector_id=self.detector_id,
+                category="test_incident",
+                score=0.9,
+                related_event_ids=[f"source-{i}" for i in range(250)],
+            )
+
+    async def run():
+        cfg = config(tmp_path)
+        events = [event(1, "first")]
+        async with build_default_runtime(cfg) as runtime:
+            runtime.analysis.detectors = [LargeEvidence()]
+            await runtime.ingest(events)
+            await runtime.drain(3)
+            live = await runtime.store.list_findings()
+        processor = build_analysis(cfg)
+        processor.detectors = [LargeEvidence()]
+        replayed = await replay(events, processor)
+        assert live == replayed["findings"]
+        assert len(live[0]["event_ids"]) == 200
+        assert live[0]["evidence_truncated"]
+
+    asyncio.run(run())

@@ -191,8 +191,8 @@ class JournalStore(SQLiteStore):
                     old = self._conn.execute(
                         "SELECT status,data_json FROM findings WHERE finding_id=?", (finding.finding_id,)
                     ).fetchone()
+                    finding = merge_finding(Finding.model_validate_json(old["data_json"]) if old else None, finding)
                     if old:
-                        finding = merge_finding(Finding.model_validate_json(old["data_json"]), finding)
                         if old["status"] == "resolved" and finding.status == "open":
                             self._conn.execute(
                                 "INSERT INTO audit(timestamp,actor,operation,data_json) VALUES(?,?,?,?)",
