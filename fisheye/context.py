@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from contextlib import asynccontextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
@@ -22,10 +23,14 @@ current_context: ContextVar[TraceContext | None] = ContextVar("fisheye_context",
 
 
 class Workflow:
-    def __init__(self, runtime, workflow_id: str | None = None, application_id="default", environment="local"):
+    def __init__(self, runtime, workflow_id: str | None = None, application_id=None, environment="local"):
         self.runtime = runtime
         self.workflow_id = workflow_id or uuid4().hex
-        self.application_id = application_id
+        self.application_id = (
+            application_id
+            if application_id is not None
+            else getattr(getattr(getattr(runtime, "config", None), "api", None), "application_id", "default")
+        )
         self.environment = environment
         self.trace_id = uuid4().hex
         self._token = None
@@ -34,8 +39,15 @@ class Workflow:
         return Agent(self, agent_id, role, task_id)
 
     async def __aenter__(self):
+        if self._token is not None:
+            raise RuntimeError("Workflow context is already active")
         self._token = current_context.set(TraceContext(self.workflow_id, trace_id=self.trace_id))
-        await self.agent("workflow").emit("workflow.start", {})
+        try:
+            await self.agent("workflow").emit("workflow.start", {})
+        except BaseException:
+            current_context.reset(self._token)
+            self._token = None
+            raise
         return self
 
     async def __aexit__(self, exc_type, exc, tb):
@@ -43,6 +55,7 @@ class Workflow:
             await self.agent("workflow").emit("workflow.stop", {"error_type": exc_type.__name__ if exc_type else None})
         finally:
             current_context.reset(self._token)
+            self._token = None
 
 
 class Agent(GenericAdapter):
@@ -109,13 +122,17 @@ class Agent(GenericAdapter):
             TraceContext(self.workflow.workflow_id, self.agent_id, task_id, self.workflow.trace_id)
         )
         child = Agent(self.workflow, self.agent_id, self.role, task_id)
-        await child.emit("task.status", dict(task_id=task_id, status="started"))
         try:
-            yield child
-        except BaseException:
-            await child.emit("task.status", dict(task_id=task_id, status="failed"))
-            raise
-        else:
-            await child.emit("task.status", dict(task_id=task_id, status="completed"))
+            await child.emit("task.status", dict(task_id=task_id, status="started"))
+            try:
+                yield child
+            except BaseException as exc:
+                await child.emit(
+                    "task.status",
+                    dict(task_id=task_id, status="cancelled" if isinstance(exc, asyncio.CancelledError) else "failed"),
+                )
+                raise
+            else:
+                await child.emit("task.status", dict(task_id=task_id, status="completed"))
         finally:
             current_context.reset(token)
