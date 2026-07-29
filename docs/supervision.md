@@ -55,6 +55,10 @@ Approving changes durable state; it does not invoke a tool in the dashboard/CLI 
 
 Cancellation records an unknown outcome. A process crash may leave an action `executing`; its external effect may already have happened. Fisheye never automatically retries it. Inspect the external system and use application-specific reconciliation. Exactly-once external effects require tool-level idempotency or transactional support.
 
+Cancellation during a database claim waits for the transaction to settle and never starts the tool. A consumed claim is recorded as `unknown` with `phase=claim`; a rejected claim keeps its original status. Once a tool returns, completion persistence finishes even if the caller is cancelled. Repeated cancellation cannot release the database while its write is still running. A synchronous tool running in a worker thread cannot be stopped by cancelling its waiter.
+
+The action transaction is authoritative for its terminal outcome. Failure to publish the secondary `action.completed` event does not replace a successful result or the tool's original exception. Inspect `supervisor.metrics` (also exposed under runtime delivery metrics as `supervision`) for `completion_event_errors` and `last_completion_event_error`. Failed completion events are not automatically retried.
+
 Captured results normalize structured objects before redaction. Unknown object types are represented by type metadata rather than private string representations. If a result cannot be captured as finite JSON, the action still records its actual terminal status with a `capture_error` type, and the caller receives the original result. A telemetry formatting failure does not make a completed tool eligible to run again. Review detail queries expose the captured result/diagnostic using the same application authorization as the action.
 
 This boundary protects only tools executed through it. Native callbacks, code outside the registry, and direct network/filesystem access remain under host control. Observation does not imply enforced pause, cancellation, or sandboxing.

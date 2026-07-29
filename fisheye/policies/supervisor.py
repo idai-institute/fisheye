@@ -7,6 +7,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Callable
 
 from fisheye.policies.models import Action, ActionDenied, Decision, Policy, ReviewRequired
+from fisheye.state.tasks import complete_on_cancel
 
 
 class Supervisor:
@@ -19,6 +20,8 @@ class Supervisor:
     def __init__(self, store, policy: Policy, tools: dict[str, Callable] | None = None, runtime=None, clock=None):
         self.store, self.policy, self.tools, self.runtime = store, policy, dict(tools or {}), runtime
         self.clock = clock or (lambda: datetime.now(timezone.utc))
+        self.completion_event_errors = 0
+        self.last_completion_event_error = None
         with store._lock:
             store._conn.executescript("""
                 CREATE TABLE IF NOT EXISTS actions (
@@ -216,6 +219,7 @@ class Supervisor:
         action = Action.model_validate(action.model_dump(mode="json"))
         if action.tool_name not in self.tools:
             raise ActionDenied("Tool is not registered at this execution boundary")
+        tool = self.tools[action.tool_name]
 
         def claim():
             with self.store._lock, self.store._conn:
@@ -250,8 +254,15 @@ class Supervisor:
                 self.store._conn.execute("UPDATE actions SET status='executing' WHERE action_id=?", (action.action_id,))
                 self._audit(action.agent_id, "action.executing", dict(action_id=action.action_id))
 
-        await asyncio.to_thread(claim)
-        tool = self.tools[action.tool_name]
+        claim_task = asyncio.create_task(asyncio.to_thread(claim))
+        try:
+            await complete_on_cancel(claim_task)
+        except asyncio.CancelledError:
+            if not claim_task.cancelled() and claim_task.exception() is None:
+                await complete_on_cancel(
+                    self._finish(action, "unknown", {"error_type": "CancelledError", "phase": "claim"})
+                )
+            raise
         try:
             if inspect.iscoroutinefunction(tool):
                 result = await tool(**action.arguments)
@@ -260,7 +271,7 @@ class Supervisor:
                 if inspect.isawaitable(result):
                     result = await result
         except BaseException as exc:
-            await asyncio.shield(
+            await complete_on_cancel(
                 self._finish(
                     action,
                     "unknown" if isinstance(exc, asyncio.CancelledError) else "failed",
@@ -268,7 +279,7 @@ class Supervisor:
                 )
             )
             raise
-        await self._finish(action, "completed", {"result": result})
+        await complete_on_cancel(self._finish(action, "completed", {"result": result}))
         return result
 
     async def _finish(self, action, status, result):
@@ -285,21 +296,34 @@ class Supervisor:
                 )
                 self._audit(action.agent_id, "action." + status, dict(action_id=action.action_id))
 
-        await asyncio.to_thread(finish)
+        await complete_on_cancel(asyncio.to_thread(finish))
         if self.runtime:
-            await self.runtime.publish(
-                dict(
-                    schema_version="2",
-                    application_id=action.application_id,
-                    environment=action.environment,
-                    workflow_id=action.workflow_id,
-                    agent_id=action.agent_id,
-                    run_id=action.workflow_id,
-                    event_type="action.completed",
-                    links=["proposal-" + action.action_id],
-                    payload=dict(action_id=action.action_id, status=status),
+            try:
+                await self.runtime.publish(
+                    dict(
+                        schema_version="2",
+                        application_id=action.application_id,
+                        environment=action.environment,
+                        workflow_id=action.workflow_id,
+                        agent_id=action.agent_id,
+                        run_id=action.workflow_id,
+                        event_type="action.completed",
+                        links=["proposal-" + action.action_id],
+                        payload=dict(action_id=action.action_id, status=status),
+                    )
                 )
-            )
+            except Exception as exc:
+                # The action transaction is authoritative. Observability failure
+                # must not replace a tool result or its original exception.
+                self.completion_event_errors += 1
+                self.last_completion_event_error = type(exc).__name__
+
+    @property
+    def metrics(self):
+        return dict(
+            completion_event_errors=self.completion_event_errors,
+            last_completion_event_error=self.last_completion_event_error,
+        )
 
     async def _expire_reviews(self):
         def expire():

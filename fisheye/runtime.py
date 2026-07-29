@@ -421,6 +421,7 @@ class FisheyeRuntime:
             projection_errors=self._projection_errors,
             projection_last_error=self._projection_last_error,
             coverage=self.analysis.coverage if self.analysis else {},
+            supervision=self.supervisor.metrics if hasattr(self, "supervisor") else {},
         )
 
     def list_routes(self) -> dict[int, Route]:

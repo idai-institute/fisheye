@@ -111,6 +111,9 @@ def test_cancelled_commit_waits_for_sqlite_transaction(tmp_path, monkeypatch):
         task.cancel()
         await asyncio.sleep(0.02)
         assert not task.done()
+        task.cancel()
+        await asyncio.sleep(0.02)
+        assert not task.done()
         release.set()
         with pytest.raises(asyncio.CancelledError):
             await task

@@ -14,6 +14,7 @@ from fisheye.collectors.sqlite_store import SQLiteStore
 from fisheye.findings import merge_finding
 from fisheye.schema.domain import Finding
 from fisheye.schema.events import EventEnvelope
+from fisheye.state.tasks import complete_on_cancel
 
 
 class EventConflictError(ValueError):
@@ -159,14 +160,7 @@ class JournalStore(SQLiteStore):
                 finally:
                     self._transaction = False
 
-        task = asyncio.create_task(asyncio.to_thread(commit_batch))
-        try:
-            await asyncio.shield(task)
-        except asyncio.CancelledError:
-            # SQLite writes in a thread cannot be cancelled. Retain ownership until
-            # the transaction settles, then let shutdown release the analyzer lock.
-            await task
-            raise
+        await complete_on_cancel(asyncio.to_thread(commit_batch))
 
     def _commit_analysis(self, sequence, event, state, alerts, findings, signals, errors, save_checkpoint=True):
         with self._lock:
