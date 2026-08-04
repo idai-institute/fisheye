@@ -6,7 +6,7 @@ import re
 from typing import Any
 
 from fisheye.preprocessors.redaction import PIIRedactionPreprocessor, SecretRedactionPreprocessor
-from fisheye.schema.serialization import json_safe
+from fisheye.schema.serialization import json_key, json_safe
 
 _PATTERNS = (
     *SecretRedactionPreprocessor.patterns,
@@ -19,19 +19,40 @@ _SENSITIVE_KEYS = re.compile(
 
 
 def redact(value: Any) -> Any:
+    return _redact(value, set(), 0)
+
+
+def _redact(value, seen, depth):
     if isinstance(value, str):
         for pattern in _PATTERNS:
             value = pattern.sub("[REDACTED]", value)
         return value
     if isinstance(value, dict):
-        return {redact(str(k)): "[REDACTED]" if _SENSITIVE_KEYS.match(str(k)) else redact(v) for k, v in value.items()}
+        if id(value) in seen:
+            return "[CIRCULAR]"
+        seen.add(id(value))
+        try:
+            return {
+                _redact(json_key(k, i), seen, depth + 1): "[REDACTED]"
+                if _SENSITIVE_KEYS.match(json_key(k, i))
+                else _redact(v, seen, depth + 1)
+                for i, (k, v) in enumerate(value.items())
+            }
+        finally:
+            seen.remove(id(value))
     if isinstance(value, (tuple, list)):
-        return [redact(v) for v in value]
+        if id(value) in seen:
+            return "[CIRCULAR]"
+        seen.add(id(value))
+        try:
+            return [_redact(v, seen, depth + 1) for v in value]
+        finally:
+            seen.remove(id(value))
     if value is None or isinstance(value, (bool, int, float)):
         return value
     # Normalize structured values before scanning them. Never leak an arbitrary
     # object's repr through a serializer's default=str fallback.
-    return redact(json_safe(value))
+    return _redact(json_safe(value), seen, depth + 1)
 
 
 def capture_event(event, raw=False, feature_only=False):
@@ -54,6 +75,8 @@ def capture_event(event, raw=False, feature_only=False):
         data["payload"] = redact(data["payload"])
         data["meta"] = redact(data["meta"])
         data["tags"] = redact(data["tags"])
+        extras = {key: data.pop(key) for key in event.model_extra or {}}
+        data.update(redact(extras))
     data["meta"].pop("_route_mode", None)
     data["meta"]["_analysis"] = analysis
     data["meta"]["features"] = {"approx_tokens": analysis["approx_tokens"], "total_chars": len(text)}

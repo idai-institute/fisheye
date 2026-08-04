@@ -61,4 +61,6 @@ The action transaction is authoritative for its terminal outcome. Failure to pub
 
 Captured results normalize structured objects before redaction. Unknown object types are represented by type metadata rather than private string representations. If a result cannot be captured as finite JSON, the action still records its actual terminal status with a `capture_error` type, and the caller receives the original result. A telemetry formatting failure does not make a completed tool eligible to run again. Review detail queries expose the captured result/diagnostic using the same application authorization as the action.
 
+Object normalization reads dataclass and Pydantic fields without invoking custom serializers or opaque key string conversions. Cycles become `[CIRCULAR]`, shared references remain ordinary repeated values, and normalized object trees stop after twelve levels with `[MAX_DEPTH]`. Secret-key redaction still applies to the resulting fields. These previews are intentionally lossy and are not serialization for later tool execution.
+
 This boundary protects only tools executed through it. Native callbacks, code outside the registry, and direct network/filesystem access remain under host control. Observation does not imply enforced pause, cancellation, or sandboxing.
