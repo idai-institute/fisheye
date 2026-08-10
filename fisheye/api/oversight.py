@@ -131,6 +131,23 @@ def register_oversight_routes(app, runtime, auth):
             config_version=runtime.config.fingerprint,
         )
 
+    @app.get("/v2/audit", dependencies=[Depends(auth)])
+    async def audit(
+        workflow_id: str | None = None,
+        environment: str = "local",
+        after: int = Query(0, ge=0),
+        limit: int = Query(100, ge=1, le=1000),
+        operation: str | None = None,
+    ):
+        rows = await runtime.store.audit_entries(
+            runtime.config.api.application_id,
+            scope=scope(workflow_id, environment) if workflow_id is not None else None,
+            after=after,
+            limit=limit,
+            operation=operation,
+        )
+        return dict(items=rows, next_cursor=rows[-1]["id"] if rows else None)
+
     @app.get("/workflows/{workflow_id:path}", response_class=HTMLResponse, dependencies=[Depends(auth)])
     async def investigation(workflow_id: str, environment: str = "local"):
         key = scope(workflow_id, environment)

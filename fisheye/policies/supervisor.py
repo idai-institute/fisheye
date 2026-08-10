@@ -43,19 +43,24 @@ class Supervisor:
             store._conn.commit()
 
     def _audit(self, actor, operation, data):
-        self.store._conn.execute(
-            "INSERT INTO audit(timestamp,actor,operation,data_json) VALUES(?,?,?,?)",
-            (self.clock().isoformat(), actor, operation, self.store._json(data)),
+        row = self.store._conn.execute("SELECT scope FROM actions WHERE action_id=?", (data["action_id"],)).fetchone()
+        self.store.append_audit(
+            actor,
+            operation,
+            data,
+            row["scope"],
+            self.clock().isoformat(),
         )
 
     def _expire(self):
+        cutoff = self.clock().isoformat()
         expired = self.store._conn.execute(
             "SELECT action_id FROM actions WHERE status IN ('approved','pending') AND expires_at<=?",
-            (self.clock().isoformat(),),
+            (cutoff,),
         ).fetchall()
         self.store._conn.execute(
             "UPDATE actions SET status='expired',reason='expired' WHERE status IN ('approved','pending') AND expires_at<=?",
-            (self.clock().isoformat(),),
+            (cutoff,),
         )
         for row in expired:
             self._audit("system", "action.expired", {"action_id": row["action_id"]})

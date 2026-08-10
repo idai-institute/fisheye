@@ -63,6 +63,7 @@ class JournalStore(SQLiteStore):
                 PRAGMA user_version=2;
             """)
             self._conn.commit()
+            self._upgrade_audit_scope()
             self._conn.execute(
                 "INSERT OR IGNORE INTO journal_settings VALUES(?,?)", ("identity_key", secrets.token_bytes(32))
             )
@@ -70,6 +71,60 @@ class JournalStore(SQLiteStore):
                 "SELECT value FROM journal_settings WHERE key='identity_key'"
             ).fetchone()[0]
             self._conn.commit()
+
+    def _upgrade_audit_scope(self):
+        """Add queryable scopes while preserving records from earlier releases."""
+        with self._lock, self._conn:
+            self._conn.execute("BEGIN IMMEDIATE")
+            columns = {row["name"] for row in self._conn.execute("PRAGMA table_info(audit)")}
+            if "scope" not in columns:
+                self._conn.execute("ALTER TABLE audit ADD COLUMN scope TEXT")
+            self._conn.execute(
+                "UPDATE audit SET scope=(SELECT scope FROM findings WHERE finding_id=json_extract(audit.data_json,'$.finding_id')) WHERE scope IS NULL AND operation LIKE 'finding.%'"
+            )
+            if self._conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='actions'").fetchone():
+                self._conn.execute(
+                    "UPDATE audit SET scope=(SELECT scope FROM actions WHERE action_id=json_extract(audit.data_json,'$.action_id')) WHERE scope IS NULL AND operation LIKE 'action.%'"
+                )
+            self._conn.execute("CREATE INDEX IF NOT EXISTS idx_audit_scope ON audit(scope,id)")
+            self._conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_audit_application ON audit(json_extract(scope,'$[0]'),id)"
+            )
+
+    def append_audit(self, actor, operation, data, scope, timestamp):
+        """Append within the caller's database transaction and lock."""
+        self._conn.execute(
+            "INSERT INTO audit(timestamp,actor,operation,data_json,scope) VALUES(?,?,?,?,?)",
+            (timestamp, actor, operation, self._json(data), scope),
+        )
+
+    async def audit_entries(self, application_id, *, scope=None, after=0, limit=100, operation=None):
+        if after < 0 or not 1 <= limit <= 1000:
+            raise ValueError("Audit pagination requires nonnegative cursor and limit 1..1000")
+        terms = ["id>?", "json_extract(scope,'$[0]')=?"]
+        args = [after, application_id]
+        if scope is not None:
+            terms.append("scope=?")
+            args.append(scope)
+        if operation is not None:
+            terms.append("operation=?")
+            args.append(operation)
+        rows = await asyncio.to_thread(
+            self._query,
+            "SELECT * FROM audit WHERE " + " AND ".join(terms) + " ORDER BY id LIMIT ?",
+            tuple(args + [limit]),
+        )
+        return [
+            dict(
+                id=r["id"],
+                timestamp=r["timestamp"],
+                actor=r["actor"],
+                operation=r["operation"],
+                scope=json.loads(r["scope"]),
+                data=json.loads(r["data_json"]),
+            )
+            for r in rows
+        ]
 
     def _commit(self):
         if not getattr(self, "_transaction", False):
@@ -188,14 +243,12 @@ class JournalStore(SQLiteStore):
                     finding = merge_finding(Finding.model_validate_json(old["data_json"]) if old else None, finding)
                     if old:
                         if old["status"] == "resolved" and finding.status == "open":
-                            self._conn.execute(
-                                "INSERT INTO audit(timestamp,actor,operation,data_json) VALUES(?,?,?,?)",
-                                (
-                                    event.observed_at.isoformat(),
-                                    "analysis",
-                                    "finding.reopened",
-                                    self._json({"finding_id": finding.finding_id, "reason": "new_evidence"}),
-                                ),
+                            self.append_audit(
+                                "analysis",
+                                "finding.reopened",
+                                {"finding_id": finding.finding_id, "reason": "new_evidence"},
+                                event.scope,
+                                event.observed_at.isoformat(),
                             )
                     self._conn.execute(
                         "INSERT OR REPLACE INTO findings VALUES(?,?,?,?,?,?)",
@@ -267,7 +320,9 @@ class JournalStore(SQLiteStore):
         def update():
             with self._lock, self._conn:
                 self._conn.execute("BEGIN IMMEDIATE")
-                row = self._conn.execute("SELECT data_json FROM findings WHERE finding_id=?", (finding_id,)).fetchone()
+                row = self._conn.execute(
+                    "SELECT scope,data_json FROM findings WHERE finding_id=?", (finding_id,)
+                ).fetchone()
                 if row is None:
                     raise KeyError(finding_id)
                 data = json.loads(row["data_json"])
@@ -276,14 +331,12 @@ class JournalStore(SQLiteStore):
                     "UPDATE findings SET status=?,data_json=? WHERE finding_id=?",
                     (status, self._json(data), finding_id),
                 )
-                self._conn.execute(
-                    "INSERT INTO audit(timestamp,actor,operation,data_json) VALUES(?,?,?,?)",
-                    (
-                        datetime.now(timezone.utc).isoformat(),
-                        actor,
-                        "finding.status",
-                        self._json(dict(finding_id=finding_id, status=status)),
-                    ),
+                self.append_audit(
+                    actor,
+                    "finding.status",
+                    dict(finding_id=finding_id, status=status),
+                    row["scope"],
+                    datetime.now(timezone.utc).isoformat(),
                 )
                 return data
 

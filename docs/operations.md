@@ -30,6 +30,7 @@ Data endpoints and dashboards require the configured API credential. `/v1/health
 | `PATCH /v2/findings/{id}` | Set lifecycle status; requires reviewer credential |
 | `GET /v2/reviews`, `GET /v2/reviews/{id}`, `POST /v2/reviews/{id}` | Page through scoped reviews, inspect one action, or decide its exact digest |
 | `GET /v2/health` | Journal backlog, coverage, errors, consumer metrics and config hash |
+| `GET /v2/audit` | Application-scoped action/finding transitions with an `after` ID cursor |
 | `GET /`, `/dashboard`, `/workflows/{id}` | Investigation UI |
 
 Workflow queries accept `environment`, defaulting to `local`. Remote application and producer IDs are bound to server configuration. Internal detector annotations supplied by remote producers are discarded. An event is limited to 256 KiB; request bodies default to 2 MiB. Invalid input returns 422, oversized requests 413, identity conflicts 409, and backlog overload 429. A 409/429 may include earlier accepted receipts. A 202 still acknowledges acceptance and indicates processing is pending/degraded.
@@ -39,6 +40,10 @@ Workflow and event identities may contain slashes, spaces, or URL-reserved chara
 Finding mutations accept `{"status":"resolved"}` (also `open`, `acknowledged`, `false_positive`). Reviews accept `{"action_digest":"...","approve":true}`. Both require `X-Review-Key` as well as API authentication when configured. Review routes require a runtime supervisor or CLI `serve --policy ...`.
 
 Review lists accept `limit`, `offset`, `status`, and optional `workflow_id`/`environment`. Application and workflow filters are applied before pagination. A direct action lookup remains available even when the item is beyond the current inbox page. CLI equivalents are `reviews list --limit 50 --offset 50 --status pending` and `reviews show --action-id ID`, with the usual `--policy` argument. CLI reads use the configured application scope. Expired reviews remain inspectable under `status=expired`; attempting to approve a stale review returns 409.
+
+Audit queries accept `workflow_id`/`environment`, an exact `operation` such as `action.reviewed`, `limit` (1–1,000), and `after` (the last audit ID consumed). Responses contain `items` and `next_cursor`; use the latter as the next `after` value. Filtering happens before pagination. The CLI exposes the same query as `fisheye --config local.toml audit --workflow-id WORKFLOW --after 0 --limit 100`. Audit reads do not require a policy file or reviewer credential. They use the configured application and retain actor, timestamp, operation, scope, and captured transition data.
+
+On open, existing audit rows acquire scope from their retained action/finding when available. Rows whose scope cannot be recovered remain in SQLite and are excluded from scoped queries. New rows retain scope independently of event/finding retention. This audit history is local operational evidence, not a tamper-evident ledger.
 
 ## Backup, export and retention
 

@@ -38,6 +38,12 @@ def _parser():
     inspect = sub.add_parser("inspect", help="Inspect a workflow graph and its findings")
     inspect.add_argument("workflow_id")
     inspect.add_argument("--environment", default="local")
+    audit = sub.add_parser("audit", help="Read scoped action and finding transitions")
+    audit.add_argument("--workflow-id")
+    audit.add_argument("--environment", default="local")
+    audit.add_argument("--after", type=int, default=0)
+    audit.add_argument("--limit", type=int, default=100)
+    audit.add_argument("--operation")
     export = sub.add_parser("export", help="Export journal events as JSONL")
     export.add_argument("path")
     doctor = sub.add_parser("doctor", help="Validate configuration and report installed integrations")
@@ -169,7 +175,17 @@ async def _run(args, cfg):
         return 0
     store = runtime.store
     try:
-        if args.command == "inspect":
+        if args.command == "audit":
+            scope = (
+                json.dumps([cfg.api.application_id, args.environment, args.workflow_id], separators=(",", ":"))
+                if args.workflow_id is not None
+                else None
+            )
+            rows = await store.audit_entries(
+                cfg.api.application_id, scope=scope, after=args.after, limit=args.limit, operation=args.operation
+            )
+            _output(dict(items=rows, next_cursor=rows[-1]["id"] if rows else None))
+        elif args.command == "inspect":
             scope = json.dumps([cfg.api.application_id, args.environment, args.workflow_id], separators=(",", ":"))
             _output(dict(graph=await store.workflow_graph(scope), findings=await store.list_findings(scope)))
         elif args.command == "export":
