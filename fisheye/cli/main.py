@@ -222,6 +222,8 @@ async def _run(args, cfg):
             else:
                 if not args.action_id or not args.digest:
                     raise ValueError("--action-id and --digest are required")
+                if await supervisor.get_review(args.action_id, cfg.api.application_id) is None:
+                    raise ValueError("Review not found")
                 _output(
                     (
                         await supervisor.review_id(

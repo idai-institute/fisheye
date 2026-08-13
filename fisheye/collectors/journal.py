@@ -358,14 +358,14 @@ class JournalStore(SQLiteStore):
         return await asyncio.to_thread(read)
 
     async def list_workflows(self, application_id=None, limit=100, offset=0):
-        where = " WHERE json_extract(event_json,'$.application_id')=?" if application_id else ""
-        args = ([application_id] if application_id else []) + [limit, offset]
+        where = " WHERE json_extract(event_json,'$.application_id')=?" if application_id is not None else ""
+        args = ([application_id] if application_id is not None else []) + [limit, offset]
         rows = await asyncio.to_thread(
             self._query,
             "SELECT scope, MIN(accepted_at) first_seen, MAX(accepted_at) last_seen, COUNT(*) event_count, "
-            "GROUP_CONCAT(DISTINCT json_extract(event_json,'$.agent_id')) agents FROM journal"
+            "json_group_array(DISTINCT json_extract(event_json,'$.agent_id')) agents FROM journal"
             + where
-            + " GROUP BY scope ORDER BY last_seen DESC LIMIT ? OFFSET ?",
+            + " GROUP BY scope ORDER BY last_seen DESC,scope LIMIT ? OFFSET ?",
             tuple(args),
         )
         return [
@@ -373,7 +373,7 @@ class JournalStore(SQLiteStore):
                 application_id=json.loads(r["scope"])[0],
                 environment=json.loads(r["scope"])[1],
                 workflow_id=json.loads(r["scope"])[2],
-                agent_ids=r["agents"].split(","),
+                agent_ids=sorted(json.loads(r["agents"])),
                 first_seen=r["first_seen"],
                 last_seen=r["last_seen"],
                 event_count=r["event_count"],
@@ -471,7 +471,7 @@ class JournalStore(SQLiteStore):
     async def scoped_runs(self, application_id, limit=100):
         rows = await asyncio.to_thread(
             self._query,
-            "SELECT json_extract(event_json,'$.run_id') run_id, MIN(accepted_at) first_seen, MAX(accepted_at) last_seen, COUNT(*) event_count, GROUP_CONCAT(DISTINCT json_extract(event_json,'$.agent_id')) agents FROM journal WHERE json_extract(event_json,'$.application_id')=? GROUP BY json_extract(event_json,'$.run_id') ORDER BY last_seen DESC LIMIT ?",
+            "SELECT json_extract(event_json,'$.run_id') run_id, MIN(accepted_at) first_seen, MAX(accepted_at) last_seen, COUNT(*) event_count, json_group_array(DISTINCT json_extract(event_json,'$.agent_id')) agents FROM journal WHERE json_extract(event_json,'$.application_id')=? GROUP BY json_extract(event_json,'$.run_id') ORDER BY last_seen DESC,run_id LIMIT ?",
             (application_id, limit),
         )
         return [
@@ -480,7 +480,7 @@ class JournalStore(SQLiteStore):
                 first_seen=r["first_seen"],
                 last_seen=r["last_seen"],
                 event_count=r["event_count"],
-                agent_ids=r["agents"].split(","),
+                agent_ids=sorted(json.loads(r["agents"])),
             )
             for r in rows
         ]

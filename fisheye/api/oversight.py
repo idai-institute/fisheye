@@ -29,7 +29,7 @@ def register_oversight_routes(app, runtime, auth):
 
     async def reviewer(x_review_key: Annotated[str | None, Header()] = None):
         expected = runtime.config.api.review_api_key
-        if not expected or not x_review_key or not hmac.compare_digest(expected, x_review_key):
+        if not expected or not x_review_key or not hmac.compare_digest(expected.encode(), x_review_key.encode()):
             raise HTTPException(403, "Reviewer credential required")
         return "operator"
 

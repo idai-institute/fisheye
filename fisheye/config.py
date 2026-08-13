@@ -32,10 +32,10 @@ class BusConfig(ConfigModel):
 class ApiConfig(ConfigModel):
     host: str = "127.0.0.1"
     port: int = Field(default=8000, ge=1, le=65535)
-    api_key: str | None = Field(default=None, repr=False)
-    review_api_key: str | None = Field(default=None, repr=False)
-    application_id: str = "default"
-    producer_id: str = "http"
+    api_key: str | None = Field(default=None, repr=False, min_length=1)
+    review_api_key: str | None = Field(default=None, repr=False, min_length=1)
+    application_id: str = Field(default="default", min_length=1, max_length=256)
+    producer_id: str = Field(default="http", min_length=1, max_length=256)
     max_body_bytes: int = Field(default=2 * 1024 * 1024, ge=1024)
 
 

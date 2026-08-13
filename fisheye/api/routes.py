@@ -29,7 +29,7 @@ def register_routes(app: FastAPI, runtime: Any, api_key: str | None = None) -> N
                 x_api_key = base64.b64decode(authorization[6:], validate=True).decode().split(":", 1)[1]
             except (ValueError, IndexError, UnicodeError):
                 pass
-        if x_api_key is None or not hmac.compare_digest(x_api_key, api_key):
+        if x_api_key is None or not hmac.compare_digest(x_api_key.encode(), api_key.encode()):
             raise HTTPException(
                 status_code=401, detail="Invalid API key", headers={"WWW-Authenticate": 'Basic realm="Fisheye"'}
             )
