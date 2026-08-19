@@ -55,6 +55,8 @@ Use SQLite's backup API for a live database, or stop the runtime before taking a
 
 Important diagnostics are pending count/oldest pending time, analysis/export errors, dead-letter count, plugin coverage, optional consumer queued/dropped/errors, and graph truncation. A sink failure leaves its outbox pending while analysis can continue. `drain()` makes that degradation visible to callers. Investigate plugin errors before treating absent findings as clean runs.
 
+Periodic retention failures set `maintenance_error` and degrade health without disabling the worker; maintenance retries at the next interval and clears the error after success. A failed periodic route flush increments the projection error counters while other routes continue. JSONL writes retain their lock until the underlying file write finishes, including during cancellation; outbox delivery remains at least once.
+
 ## Upgrade from 0.1
 
 1. Stop writes to the old deployment, back up its database, and keep the original package/configuration available for rollback.

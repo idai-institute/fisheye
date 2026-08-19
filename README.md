@@ -48,6 +48,8 @@ asyncio.run(main())
 
 Messages, delegations, and artifacts should carry explicit source IDs. Temporal proximity alone does not establish causality. Scope is `(application_id, environment, workflow_id)`; old events without a workflow retain their original run grouping.
 
+Workflows inherit `api.application_id` from the runtime configuration unless explicitly overridden. Failed workflow/task entry restores the parent tracing context. Cancelled tasks emit a `cancelled` status.
+
 For synchronous producers, one context owns a persistent background event loop:
 
 ```python

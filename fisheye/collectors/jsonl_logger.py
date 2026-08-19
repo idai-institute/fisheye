@@ -10,6 +10,7 @@ from fisheye.privacy import redact
 from fisheye.schema.alerts import Alert
 from fisheye.schema.events import EventEnvelope
 from fisheye.schema.serialization import json_safe
+from fisheye.state.tasks import complete_on_cancel
 
 
 class JsonlLoggerCollector(Collector, AlertSink):
@@ -42,8 +43,12 @@ class JsonlLoggerCollector(Collector, AlertSink):
             + "\n"
         )
         async with self._lock:
-            await asyncio.to_thread(self._rotate_if_needed, path)
-            await asyncio.to_thread(self._append_line, path, line)
+
+            def write():
+                self._rotate_if_needed(path)
+                self._append_line(path, line)
+
+            await complete_on_cancel(asyncio.to_thread(write))
 
     def _rotate_if_needed(self, path: Path) -> None:
         if not path.exists() or path.stat().st_size < self.rotate_bytes:
@@ -77,7 +82,7 @@ class JsonlLoggerCollector(Collector, AlertSink):
                     self._rotate_if_needed(path)
                     self._append_line(path, "".join(lines))
 
-            await asyncio.to_thread(write)
+            await complete_on_cancel(asyncio.to_thread(write))
 
     async def handle_event(self, event: EventEnvelope) -> None:
         await self._write_line(self.events_path, event.model_dump(mode="json"))

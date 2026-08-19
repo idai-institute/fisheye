@@ -37,7 +37,9 @@ def register_routes(app: FastAPI, runtime: Any, api_key: str | None = None) -> N
     @app.get("/v1/health")
     async def health() -> dict[str, Any]:
         return {
-            "status": "degraded" if runtime._analysis_error or runtime._export_error else "ok",
+            "status": "degraded"
+            if runtime._analysis_error or runtime._export_error or runtime._maintenance_error
+            else "ok",
             "runtime_started": getattr(runtime, "_started", False),
         }
 

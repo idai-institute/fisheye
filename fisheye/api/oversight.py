@@ -124,7 +124,9 @@ def register_oversight_routes(app, runtime, auth):
     @app.get("/v2/health", dependencies=[Depends(auth)])
     async def health():
         return dict(
-            status="degraded" if runtime._analysis_error or runtime._export_error else "ok",
+            status="degraded"
+            if runtime._analysis_error or runtime._export_error or runtime._maintenance_error
+            else "ok",
             journal=await runtime.store.journal_metrics(),
             coverage=runtime.analysis.coverage,
             delivery=runtime.metrics,

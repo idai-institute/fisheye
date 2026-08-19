@@ -98,6 +98,7 @@ class FisheyeRuntime:
         self._journal_busy = False
         self._projection_errors = 0
         self._projection_last_error: str | None = None
+        self._maintenance_error: str | None = None
         self._lifecycle_lock = asyncio.Lock()
         self._analysis_lease = None
         self._closed = False
@@ -280,12 +281,21 @@ class FisheyeRuntime:
         while True:
             await asyncio.sleep(0.1)
             if self.analysis is not None and time.monotonic() - self._last_maintenance > 60:
-                await self.store.prune(self.config.storage.retention_days, self.config.storage.state_ttl_seconds)
-                self._last_maintenance = time.monotonic()
+                try:
+                    await self.store.prune(self.config.storage.retention_days, self.config.storage.state_ttl_seconds)
+                    self._maintenance_error = None
+                except Exception as exc:
+                    self._maintenance_error = type(exc).__name__
+                finally:
+                    self._last_maintenance = time.monotonic()
             for mode, pipeline in self.preprocessor_pipelines.items():
                 for processor in pipeline.preprocessors:
                     if isinstance(processor, BufferingPreprocessor) and processor._should_flush():
-                        await self._flush_mode(mode)
+                        try:
+                            await self._flush_mode(mode)
+                        except Exception as exc:
+                            self._projection_errors += 1
+                            self._projection_last_error = type(exc).__name__
                         break
 
     async def _publish_mode(self, event: EventEnvelope, mode: RouteMode) -> DeliveryReceipt:
@@ -418,6 +428,7 @@ class FisheyeRuntime:
             journal=self._journal_metrics,
             analysis_error=self._analysis_error,
             export_error=self._export_error,
+            maintenance_error=self._maintenance_error,
             projection_errors=self._projection_errors,
             projection_last_error=self._projection_last_error,
             coverage=self.analysis.coverage if self.analysis else {},
