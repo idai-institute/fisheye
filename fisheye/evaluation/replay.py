@@ -139,13 +139,21 @@ def compare(before, after):
             f["application_id"],
             f.get("environment", "local"),
             f["workflow_id"],
-            f["category"],
-            f.get("finding_id", ""),
-            tuple(sorted(f["event_ids"])),
+            ("id", f["finding_id"])
+            if f.get("finding_id")
+            else ("legacy", f["category"], tuple(sorted(f["event_ids"]))),
         )
 
-    old = {key(f): f for f in before["findings"]}
-    new = {key(f): f for f in after["findings"]}
+    def index(report):
+        result = {}
+        for finding in report["findings"]:
+            identity = key(finding)
+            if identity in result:
+                raise ValueError("Duplicate finding identity in comparison report")
+            result[identity] = finding
+        return result
+
+    old, new = index(before), index(after)
     return dict(
         added=[new[k] for k in sorted(new.keys() - old.keys())],
         removed=[old[k] for k in sorted(old.keys() - new.keys())],
@@ -154,7 +162,23 @@ def compare(before, after):
             for k in sorted(new.keys() & old.keys())
             if any(
                 old[k].get(field) != new[k].get(field)
-                for field in ("score", "severity", "title", "evidence", "status", "agent_ids", "evidence_truncated")
+                for field in (
+                    "score",
+                    "score_kind",
+                    "severity",
+                    "title",
+                    "category",
+                    "evidence",
+                    "status",
+                    "agent_ids",
+                    "event_ids",
+                    "evidence_truncated",
+                    "occurrences",
+                    "first_seen",
+                    "last_seen",
+                    "config_version",
+                    "detector_version",
+                )
             )
         ],
     )

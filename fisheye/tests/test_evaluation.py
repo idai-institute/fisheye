@@ -107,3 +107,17 @@ def test_comparison_preserves_environment_and_reports_evidence_changes():
     assert not report["added"] and not report["removed"]
     assert len(report["changed"]) == 1
     assert report["changed"][0]["after"]["environment"] == "prod"
+
+
+def test_comparison_tracks_new_evidence_under_stable_finding_identity():
+    finding = dict(
+        finding_id="f", application_id="app", workflow_id="w", category="x", event_ids=["old"], occurrences=1
+    )
+    updated = dict(finding, event_ids=["old", "new"], occurrences=2, config_version="changed")
+    report = compare({"findings": [finding]}, {"findings": [updated]})
+    assert report == {"added": [], "removed": [], "changed": [{"before": finding, "after": updated}]}
+    with pytest.raises(ValueError, match="Duplicate finding identity"):
+        compare({"findings": [finding, updated]}, {"findings": []})
+    legacy = dict(finding)
+    legacy.pop("finding_id")
+    assert compare({"findings": [legacy]}, {"findings": [legacy]}) == {"added": [], "removed": [], "changed": []}
