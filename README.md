@@ -106,4 +106,6 @@ python tools/wheel_smoke.py
 python tools/benchmark.py --events 1000
 ```
 
+For an offline package check, use `python tools/wheel_smoke.py --wheel dist/fisheye-0.2.2-py3-none-any.whl --wheelhouse /path/to/dependency-wheels`. The check installs core and server dependencies into a fresh temporary environment and exercises the packaged server lifecycle and offline corpus.
+
 The initial deployment boundary is one trusted application/team with one analysis runtime per database. Distributed analysis, enterprise tenancy, and production-scale performance certification remain outside this release. The [overhaul design](docs/overhaul-plan.md) records the broader roadmap; the release notes report what has been implemented and verified.
