@@ -2,7 +2,7 @@
 
 Fisheye observes cooperating agents, connects their actions to source evidence, and optionally gates tool execution through explicit policies. It runs locally as a Python library, with a SQLite journal, an investigation dashboard, and offline replay. Python 3.10+ is required.
 
-Version 0.2 adds durable event acceptance, workflow graphs, correlated findings, shared budgets, persistent human reviews, and native framework bridges. Version 0.2.1 improves runtime recovery, replay consistency, graph traversal, review queries, and result capture. See [release notes](docs/release-notes.md) for verification results and remaining limits.
+Version 0.2 adds durable event acceptance, workflow graphs, correlated findings, shared budgets, persistent human reviews, and native framework bridges. Version 0.2.2 adds scoped audit queries and improves cancellation, context recovery, structured capture, and replay comparisons. See [release notes](docs/release-notes.md) for verification results and remaining limits.
 
 ## Run a complete local example
 
@@ -80,6 +80,7 @@ fisheye replay recording.jsonl --output before.json
 fisheye --config changed.toml replay recording.jsonl --output after.json
 fisheye compare before.json after.json
 fisheye policy validate examples/review-policy.json
+fisheye --config examples/local.toml audit --workflow-id document-review
 ```
 
 The dashboard shows workflows, a causal graph, event summaries, findings and evidence paths, health, and a review inbox. Complete captured events are available through the paginated API/export. Offline replay runs the default rules without calling tools or model services. The bundled seven-scenario corpus is a regression check, not a general detection accuracy benchmark.

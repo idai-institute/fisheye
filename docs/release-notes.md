@@ -1,5 +1,37 @@
 # Fisheye releases
 
+## 0.2.2
+
+This release adds an application-scoped audit reader and fixes interruption, capture, query, and replay behavior discovered after 0.2.1.
+
+- `GET /v2/audit` and the `audit` CLI command expose ordered action/finding transitions with cursor pagination, workflow/environment filters, and exact operation filtering. Existing records acquire scope from retained actions/findings; unattributed records remain in SQLite and stay outside scoped reads. New records retain scope through event/finding retention.
+- Supervised execution settles database claims before propagating cancellation and never starts a tool after a cancelled claim. Completion writes and JSONL exports keep ownership through repeated cancellation. Secondary completion-event failures preserve tool results/original exceptions and appear in supervision metrics.
+- Failed workflow/task entry restores parent context. Workflows inherit the configured application, reject simultaneous reentry, and distinguish cancellation from task failure. Background maintenance reports failures, continues serving, and retries; failed periodic route flushes leave other routes running.
+- Dataclass/Pydantic result capture detects cycles, bounds object depth, uses enum values, and avoids opaque key string conversions and custom model serializers. Extension fields are redacted before optional consumer delivery. Live first-occurrence evidence limits now match replay.
+- Workflow/run lists preserve comma-containing agent names and have deterministic ordering on timestamp ties. CLI review mutations respect application scope. Unicode credentials compare safely, and empty credentials/application/producer configuration fails validation.
+- Replay comparison uses stable finding identity when available, so new evidence and occurrence counts appear as changes to an existing finding. Duplicate identities in a report are rejected. Reports without finding IDs retain the legacy evidence-based matching rule.
+- Package verification can select an exact wheel and install offline from a wheel directory; it checks packaged templates, version consistency, server startup/drain/shutdown, and evaluation outside the source checkout.
+
+### Local verification
+
+| Check | Result |
+| --- | --- |
+| Python 3.12 with all four optional integrations | 127 passed; eight upstream Camel deprecation warnings |
+| Python 3.10 and 3.13 core/server environments | 122 passed and five optional integration tests skipped on each |
+| Ruff lint and formatting | Passed across library, tests, examples, and tools |
+| Wheel and source archive | Built using locally available build dependencies |
+| Fresh core/server wheel installs | Passed offline, including the packaged server lifecycle |
+| Offline regression corpus | Seven of seven assessed scenarios passed |
+| Documentation and examples | Three README/supervision Python snippets, local workflow example, and relative links passed |
+
+The [validation record](validation/release-checks-0.2.2.json) describes these checks. The restricted local environment blocks writes to asyncio's wake-up sockets, so the test runner used a temporary OS-pipe wake-up adapter. Database workers and tool threads ran normally. No hosted CI run or Windows verification is implied. These changes do not establish a new throughput measurement or complete the sustained-load/24-hour soak gates.
+
+### Upgrade notes
+
+Stop the existing analyzer before upgrading. Version 2 databases remain compatible; startup adds the audit scope column/indexes and backfills recoverable scopes. Make a backup before opening an existing database. Earlier releases can continue to read these databases, but their newly written audit rows acquire scope only after a later 0.2.2 reopen.
+
+Set the CLI configuration's application explicitly when reviewing actions created under another application. Replace empty credential strings with a nonempty credential or `null` to disable that credential. Result previews may contain `[CIRCULAR]` or `[MAX_DEPTH]`; hosts must retain original execution arguments. Audit history is operational evidence and does not provide cryptographic tamper detection.
+
 ## 0.2.1
 
 This maintenance release fixes completion and recovery races, makes live and replayed findings consistent, and improves investigation and supervision under malformed or out-of-order input.
