@@ -64,6 +64,7 @@ class AnalysisProcessor:
         return [d.detector_id for d in self.detectors]
 
     async def analyze(self, event, checkpoint=None):
+        self.coverage = {detector.detector_id: "not_applicable" for detector in self.detectors}
         if checkpoint and checkpoint.get("version") != 2:
             raise ValueError("Unsupported analysis checkpoint version")
         state = decode(checkpoint["data"]) if checkpoint else {}
@@ -175,4 +176,6 @@ class AnalysisProcessor:
                 )
         for finding in findings:
             finding.config_version = self.config_version
-        return AnalysisResult(dict(version=2, data=encode(state)), alerts, findings, signals, errors)
+        return AnalysisResult(
+            dict(version=2, data=encode(state), coverage=dict(self.coverage)), alerts, findings, signals, errors
+        )

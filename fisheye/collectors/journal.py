@@ -26,6 +26,7 @@ class JournalStore(SQLiteStore):
         super().__init__(db_path)
         self.max_pending = max_pending
         self._transaction = False
+        self.analysis_projections = []
         with self._lock:
             self._conn.execute("PRAGMA journal_mode=WAL")
             self._conn.execute("PRAGMA synchronous=FULL")
@@ -271,6 +272,8 @@ class JournalStore(SQLiteStore):
                         "INSERT OR REPLACE INTO checkpoints VALUES(?,?,?,?)",
                         (event.scope, sequence, self._json(state), event.observed_at.isoformat()),
                     )
+                for projection in self.analysis_projections:
+                    projection(self, sequence, event, state, alerts, findings, signals, errors)
                 self._conn.execute("UPDATE journal SET processed=1 WHERE sequence=?", (sequence,))
                 self._commit()
             except BaseException:
