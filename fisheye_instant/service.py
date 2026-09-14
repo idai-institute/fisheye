@@ -96,6 +96,9 @@ class InstantService:
             return False
         try:
             if action["rule"]["action"] == "email":
+                if json.loads(action["scope"])[1] == "demo":
+                    await asyncio.to_thread(self.store.finish, action["id"], "preview")
+                    return True
                 settings = MailSettings.model_validate(self.store.settings()["mail"])
                 if not settings.host or not settings.sender:
                     raise ValueError("Email delivery is not configured")
