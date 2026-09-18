@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light"><title>Fisheye Instant · Agent oversight</title>
+<link rel="stylesheet" href="/instant/static/app.css"><script src="/instant/static/app.js" defer></script></head>
+<body>
+<aside class="sidebar">
+  <a class="brand" href="/" aria-label="Fisheye Instant home"><span class="brand-icon"><svg viewBox="0 0 32 32" aria-hidden="true"><path d="M3 16C10 3 22 3 29 16C22 29 10 29 3 16Z"/><circle cx="16" cy="16" r="5"/></svg></span><span>fisheye<span class="instant-label">INSTANT</span></span></a>
+  <div class="nav-label">CONTROL ROOM</div>
+  <nav aria-label="Main navigation">
+    <button class="nav-item active" data-tab="overview"><span aria-hidden="true">◉</span> Overview</button>
+    <button class="nav-item" data-tab="rules"><span aria-hidden="true">⌘</span> Response rules <span id="rule-count" class="nav-count">1</span></button>
+    <button class="nav-item" data-tab="connect"><span aria-hidden="true">↗</span> Connect an agent</button>
+    <button class="nav-item" data-tab="settings"><span aria-hidden="true">⚙</span> Settings</button>
+  </nav>
+  <div class="sidebar-note"><span class="pulse"></span> LOCAL OVERSIGHT<p>Your signals. Your rules.<br>Your agents under control.</p></div>
+  <a href="/dashboard" class="library-link">Open detailed investigation <span>↗</span></a>
+  <div class="sidebar-footer"><span class="avatar">F</span><div>Local workspace<small>Instant v0.1</small></div><span class="workspace-dot"></span></div>
+</aside>
+<div class="workspace">
+<header class="topbar"><div>Workspace <span class="slash">/</span> <strong id="breadcrumb">Overview</strong></div><div class="topbar-right"><span id="connection" class="connection"><i></i> Connecting</span><button class="quiet" id="access-button">Access key</button></div></header>
+<main>
+<div id="notice" class="notice" role="status" hidden></div>
+<section class="page" id="page-overview">
+  <div class="page-heading"><div><span class="eyebrow">AGENT OBSERVABILITY, SIMPLIFIED</span><h1>Your agents, in view.</h1><p>Every anomaly signal. One clear score. A response when it matters.</p></div><button class="primary" id="demo-button" hidden><span>▶</span> Run sample workflow</button></div>
+  <div class="toolbar"><label class="workflow-label" for="workflow-select">Watching <select id="workflow-select"><option>No connected workflows</option></select></label><span class="subtle" id="window-label">Rolling 5-minute window</span></div>
+  <div id="empty-state" class="empty-state" hidden><div class="empty-orbit">◉</div><h2>A little visibility goes a long way.</h2><p>Connect your first agent to see its anomaly score and set up automatic responses.</p><button class="primary" data-open="connect">Connect an agent <span>↗</span></button><span class="subtle">Already sending events? This page updates automatically.</span></div>
+  <div id="dashboard-content" hidden>
+    <div class="hero-grid">
+      <section class="score-card card"><div class="card-top"><span class="eyebrow">UNIFIED ANOMALY SCORE</span><span class="pill" id="risk-badge">Waiting</span></div><div class="score-layout"><div><div class="score-number"><span id="score-value">—</span><span>/ 100</span></div><h2 id="score-title">Waiting for signals</h2><p id="score-description">Scores appear as your agent runs.</p></div><svg class="gauge" viewBox="0 0 180 180" role="img" aria-label="Anomaly score gauge"><circle class="gauge-track" cx="90" cy="90" r="69"/><circle id="gauge-value" class="gauge-value" cx="90" cy="90" r="69" pathLength="100"/><text x="90" y="85">ANOMALY</text><text x="90" y="109" class="gauge-caption" id="gauge-status">WATCHING</text></svg></div><div class="score-foot"><span class="tiny-dot"></span> Heuristic score · not a probability <button class="text-button" id="score-info">How it works</button></div></section>
+      <section class="summary-card card"><span class="eyebrow">AT A GLANCE</span><div class="summary-row"><div class="summary-icon">◎</div><div>Contributing signals<small>Across all detection channels</small></div><strong id="signal-count">0</strong></div><div class="summary-row"><div class="summary-icon">◇</div><div>Workflows observed<small>In this application</small></div><strong id="workflow-count">0</strong></div><div class="summary-row"><div class="summary-icon">⚡</div><div>Response rules<small>Enabled and watching</small></div><strong id="enabled-count">0</strong></div><div class="coverage" id="coverage"><i></i><span>Checking detector coverage</span></div></section>
+    </div>
+    <div class="detail-grid">
+      <section class="card trend-card"><div class="section-heading"><div><h2>The bigger picture</h2><p>Score at each analyzed event</p></div><span class="chart-key"><i></i> Anomaly score</span></div><div class="chart-wrap"><svg id="trend" viewBox="0 0 700 185" role="img" aria-label="Recent anomaly score history"></svg></div><div class="chart-bottom"><span id="history-start">Earlier</span><span>Latest event</span></div></section>
+      <section class="card rules-preview"><div class="section-heading"><div><h2>On your behalf</h2><p>Responses at your thresholds</p></div><button class="text-button" data-open="rules">Manage ↗</button></div><div id="rule-preview-list"></div></section>
+    </div>
+    <div class="detail-grid lower-grid">
+      <section class="card"><div class="section-heading"><div><h2>What’s behind the score</h2><p>Strongest recent signal from each channel</p></div><span class="tag">LIVE SIGNALS</span></div><div id="signals" class="signals"></div></section>
+      <section class="card activity-card"><div class="section-heading"><div><h2>Response activity</h2><p>A clear record of every action</p></div><span id="activity-count" class="count-pill">0</span></div><div id="activity"></div></section>
+    </div>
+  </div>
+  <div class="page-foot"><span><span class="tiny-dot"></span> Built for agents. Kept under your control.</span><span id="last-updated">Waiting for connection</span></div>
+</section>
+<section class="page" id="page-rules" hidden>
+  <div class="page-heading"><div><span class="eyebrow">FROM SIGNAL TO RESPONSE</span><h1>Decide what happens next.</h1><p>Set thresholds once. Let Fisheye watch for the crossing.</p></div><button class="primary" id="add-rule">＋ Add a rule</button></div>
+  <div class="info-strip">Rules fire when a score crosses their threshold. They rearm after the score falls below the rearm margin and the cooldown has elapsed.</div>
+  <div id="rules-list" class="rule-cards"></div>
+</section>
+<section class="page" id="page-connect" hidden>
+  <div class="page-heading"><div><span class="eyebrow">A FEW LINES TO VISIBILITY</span><h1>Give your agents a lookout.</h1><p>Use the Python library or send events from any stack.</p></div></div>
+  <div class="connect-grid"><section class="card connect-card"><span class="step">01</span><h2>Send your first event</h2><p>POST your agent’s events to this app. Include the API key when authentication is enabled.</p><pre id="curl-example"></pre><button class="secondary" id="copy-example">Copy example</button><p class="subtle">Use the same workflow ID to connect messages, tool calls, and outcomes. Scores begin with newly analyzed events.</p></section><section class="card connect-card"><span class="step">02</span><h2>Let your host stop an agent</h2><p>Register a shutdown callback when creating the app. Then choose that workflow in a shutdown rule.</p><pre>from fisheye_instant.app import create_app
+
+async def stop_agent(workflow_id,
+                     environment,
+                     idempotency_key):
+    await my_agent.stop()
+
+app = create_app(runtime=runtime,
+    stop_handlers={
+      ("local", "my-workflow"): stop_agent
+    })</pre><p class="subtle">Your callback controls the actual stop operation. Use the action ID to make repeated host requests safe.</p></section></div>
+  <section class="card connect-card"><h2>Keep the full picture</h2><p>The <a href="/dashboard">investigation dashboard ↗</a> includes event timelines, causal relationships, findings, and human reviews. <a href="/docs">API documentation ↗</a> covers ingestion and audit queries.</p></section>
+</section>
+<section class="page" id="page-settings" hidden>
+  <div class="page-heading"><div><span class="eyebrow">YOUR CONTROL ROOM</span><h1>A setup that fits your team.</h1><p>Configure where email countermeasures are delivered from.</p></div></div>
+  <form id="mail-form" class="card settings-card"><h2>Email delivery</h2><p class="subtle">Delivery uses TLS. Credentials stay on this server and are never returned to the browser.</p><div class="form-grid"><label>SMTP host<input name="host" placeholder="smtp.example.com" maxlength="253"></label><label>Port<input name="port" type="number" min="1" max="65535" value="587" required></label><label>Connection security<select name="security"><option value="starttls">STARTTLS</option><option value="tls">TLS from connection</option></select></label><label>Sender address<input name="sender" type="email" placeholder="alerts@example.com"></label><label>Username<input name="username" autocomplete="username"></label><label>Password<input name="password" type="password" autocomplete="new-password" placeholder="Leave blank to keep the saved password"></label></div><div class="form-footer"><span class="subtle" id="password-state">No password saved</span><button class="primary" type="submit">Save email settings</button></div><p class="form-status" role="status"></p></form>
+  <section class="card settings-card"><h2>Scoring you can inspect</h2><p>Fisheye combines the strongest score per detector, behavior source, and graph category over the last five minutes using <code>100 × (1 − ∏(1 − channel score))</code>. Repeated observations from the same channel do not add up.</p><p>It is a heuristic indicator, not a probability or a guarantee of safety. Missing detector coverage and stale workflows are shown separately. Rules apply to each workflow and environment independently.</p><p>Warning and critical labels use 60 and 85. Your response thresholds are independent of these display labels.</p></section>
+</section>
+</main></div>
+<dialog id="rule-dialog"><form id="rule-form"><div class="dialog-heading"><div><span class="eyebrow">AUTOMATIC COUNTERMEASURE</span><h2 id="rule-dialog-title">Add a response rule</h2></div><button type="button" class="icon-button" data-close aria-label="Close">×</button></div><label>Rule name<input name="name" placeholder="Warn me when something looks unusual" maxlength="80" required></label><div class="form-grid"><label>When the score reaches<input name="threshold" type="number" min="2" max="100" value="70" required></label><label>Take this action<select name="action"><option value="warning">Raise a warning</option><option value="email">Send an email</option><option value="shutdown">Shut down an agent</option></select></label></div><label id="recipients-field" hidden>Email recipients<input name="recipients" placeholder="you@example.com, teammate@example.com"></label><label id="target-field" hidden>Agent workflow<select name="target"><option value="">Select a registered workflow</option></select></label><p id="action-help" class="subtle">Warnings are recorded in the response activity feed.</p><details class="advanced"><summary>Cooldown and rearming</summary><div class="form-grid"><label>Cooldown (seconds)<input name="cooldown_seconds" type="number" min="0" max="86400" value="300" required></label><label>Rearm margin (points)<input name="hysteresis" type="number" min="1" max="50" value="10" required></label></div></details><label class="checkbox-label"><input name="enabled" type="checkbox" checked> Enable this rule</label><p class="form-status" role="status"></p><div class="dialog-actions"><button type="button" class="secondary" data-close>Cancel</button><button class="primary" type="submit">Save rule</button></div></form></dialog>
+<dialog id="access-dialog"><form id="access-form"><div class="dialog-heading"><h2>Reviewer access</h2><button type="button" class="icon-button" data-close aria-label="Close">×</button></div><p>Enter the reviewer key to change rules and settings. It stays in memory for this tab.</p><label>Reviewer key<input type="password" name="key" autocomplete="off"></label><div class="dialog-actions"><button class="primary" type="submit">Use key</button></div></form></dialog>
+<div id="toast" class="toast" role="status" hidden></div>
+</body></html>
