@@ -50,6 +50,7 @@ from importlib.metadata import version
 from importlib.resources import files
 from fisheye.api.app import create_app
 from fisheye.cli.main import main
+from fisheye_instant.app import create_app as create_instant
 
 async def check():
     app = create_app()
@@ -63,11 +64,20 @@ async def check():
         await runtime.drain(5)
         assert (await runtime.store.journal_metrics())["pending"] == 0
     assert runtime._closed
+    for asset in ("static/app.js", "static/app.css", "templates/index.html"):
+        assert files("fisheye_instant").joinpath(asset).is_file()
+    instant = create_instant(demo=True)
+    async with instant.router.lifespan_context(instant):
+        service = instant.state.instant
+        assert service.settings()["rules"]
+        assert service._worker is not None
+    assert service._worker is None
 
 asyncio.run(check())
 raise SystemExit(main(["evaluate", "--split", "all"]))
 """,
         )
+        run("-m", "fisheye_instant.cli", "--help")
     print("Installed wheel imports, templates, server lifecycle, CLI, and offline evaluation passed.")
 
 

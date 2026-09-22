@@ -1,8 +1,19 @@
 # Fisheye
 
+## Fisheye Instant
+
+Start a local control room with one anomaly score, contributing evidence, and threshold-based warning, email, or agent shutdown rules:
+
+```bash
+python -m pip install -e '.[instant]'
+fisheye-instant --demo
+```
+
+Open http://127.0.0.1:8000 and run the sample workflow. [Instant setup and countermeasures](docs/instant.md) explains scoring, email delivery, and registering a real agent shutdown hook. The library and full investigation dashboard remain available below.
+
 Fisheye observes cooperating agents, connects their actions to source evidence, and optionally gates tool execution through explicit policies. It runs locally as a Python library, with a SQLite journal, an investigation dashboard, and offline replay. Python 3.10+ is required.
 
-Version 0.2 adds durable event acceptance, workflow graphs, correlated findings, shared budgets, persistent human reviews, and native framework bridges. Version 0.2.2 adds scoped audit queries and improves cancellation, context recovery, structured capture, and replay comparisons. See [release notes](docs/release-notes.md) for verification results and remaining limits.
+Version 0.3 adds Fisheye Instant on top of durable event acceptance, workflow graphs, correlated findings, shared budgets, persistent human reviews, scoped audit queries, and native framework bridges. See [release notes](docs/release-notes.md) for verification results and remaining limits.
 
 ## Run a complete local example
 

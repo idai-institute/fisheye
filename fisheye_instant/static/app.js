@@ -136,7 +136,8 @@ $('#add-rule').onclick = () => editRule(); $('#rule-form').elements.action.oncha
 $('#rule-form').onsubmit = async event => {
   event.preventDefault(); const form = event.target, fields = form.elements, submit = form.querySelector('[type=submit]'); submit.disabled = true;
   try {
-    const target = fields.action.value === 'shutdown' && fields.target.value ? JSON.parse(fields.target.value) : [null, null];
+    const previous = state.settings.rules.find(rule => rule.id === state.editing);
+    const target = fields.action.value === 'shutdown' ? (fields.target.value ? JSON.parse(fields.target.value) : [null, null]) : [previous?.workflow_id || null, previous?.environment || null];
     const rule = {id: state.editing || crypto.randomUUID(), name: fields.name.value.trim(), action: fields.action.value, threshold: Number(fields.threshold.value), enabled: fields.enabled.checked, cooldown_seconds: Number(fields.cooldown_seconds.value), hysteresis: Number(fields.hysteresis.value), workflow_id: target[0], environment: target[1], recipients: fields.action.value === 'email' ? fields.recipients.value.split(',').map(s => s.trim()).filter(Boolean) : []};
     await saveSettings([...state.settings.rules.filter(item => item.id !== rule.id), rule]); $('#rule-dialog').close(); toast('Response rule saved.');
   } catch (error) {form.querySelector('.form-status').textContent = error.message;} finally {submit.disabled = false;}
