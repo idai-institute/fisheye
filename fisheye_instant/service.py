@@ -97,7 +97,7 @@ class InstantService:
         try:
             if action["rule"]["action"] == "email":
                 if json.loads(action["scope"])[1] == "demo":
-                    await asyncio.to_thread(self.store.finish, action["id"], "preview")
+                    await complete_on_cancel(asyncio.to_thread(self.store.finish, action["id"], "preview"))
                     return True
                 settings = MailSettings.model_validate(self.store.settings()["mail"])
                 if not settings.host or not settings.sender:
@@ -107,7 +107,9 @@ class InstantService:
                 app, environment, workflow = json.loads(action["scope"])
                 handler = self.stop_handlers.get((environment, workflow))
                 if handler is None:
-                    await asyncio.to_thread(self.store.finish, action["id"], "blocked", "ShutdownHookUnavailable")
+                    await complete_on_cancel(
+                        asyncio.to_thread(self.store.finish, action["id"], "blocked", "ShutdownHookUnavailable")
+                    )
                     return True
                 kwargs = dict(workflow_id=workflow, environment=environment, idempotency_key=action["id"])
                 if inspect.iscoroutinefunction(handler):

@@ -10,6 +10,7 @@ from collections import defaultdict
 from dataclasses import dataclass
 
 from fisheye.behavior.monitor import StatisticalBehaviorMonitor
+from fisheye.detectors.base import DetectorSignal
 from fisheye.detectors.dos import DoSDetector
 from fisheye.detectors.exfiltration import DataExfiltrationDetector
 from fisheye.detectors.prompt_injection import PromptInjectionDetector
@@ -147,6 +148,16 @@ class AnalysisProcessor:
         for key, value in state.get("behavior", {}).items():
             getattr(monitor, key).update(value)
         await monitor.handle_event(event)
+        signals.extend(
+            DetectorSignal(
+                detector_id="behavior." + measurement["metric"],
+                category="behavioral",
+                score=measurement["score"],
+                evidence=measurement,
+                related_event_ids=[event.event_id],
+            )
+            for measurement in monitor.observations
+        )
         self.coverage["behavioral"] = "insufficient_input" if monitor.invalid_measurements else "evaluated"
         state["behavior"] = {k: dict(v) for k, v in vars(monitor).items() if k.startswith("_") and isinstance(v, dict)}
         for i, alert in enumerate(sink.alerts):

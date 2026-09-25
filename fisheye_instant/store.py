@@ -108,7 +108,9 @@ class InstantStore:
                 evidence=signal.evidence,
             )
         for alert in alerts:
-            if alert.category == "behavioral":
+            if alert.category == "behavioral" and not any(
+                signal.detector_id.startswith("behavior.") for signal in signals
+            ):
                 key = "behavior:" + ":".join(sorted(alert.sources))
                 if key not in observations or alert.score > observations[key]["score"]:
                     observations[key] = dict(

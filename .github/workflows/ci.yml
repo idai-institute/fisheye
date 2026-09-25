@@ -30,3 +30,18 @@ jobs:
           python-version: '3.12'
       - run: python -m pip install -e '.[dev,${{ matrix.integration }}]'
       - run: python -m pytest -q fisheye/tests/test_native_integrations.py
+  instant-browser:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -e '.[dev,instant]' playwright
+      - run: python -m playwright install --with-deps chromium
+      - run: python tools/instant_browser_smoke.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: instant-browser-screenshots
+          path: /tmp/instant-*.png

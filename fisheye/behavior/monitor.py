@@ -29,6 +29,7 @@ class StatisticalBehaviorMonitor(Collector):
         self.store = store
         self.alert_sinks = alert_sinks or []
         self.threshold = threshold
+        self.observations = []
         self.z_threshold = z_threshold
         self.rate_window = timedelta(seconds=rate_window_seconds)
         self.min_samples = min_samples
@@ -49,6 +50,7 @@ class StatisticalBehaviorMonitor(Collector):
         self._tool_dist_stats: dict[str, ToolDistributionTracker] = defaultdict(ToolDistributionTracker)
 
     async def handle_event(self, event: EventEnvelope) -> None:
+        self.observations = []
         # Keep high-cardinality tool/agent dimensions bounded inside a workflow.
         for value in vars(self).values():
             if isinstance(value, defaultdict) and len(value) > 1000:
@@ -244,6 +246,17 @@ class StatisticalBehaviorMonitor(Collector):
         zscore: float,
         tool_name: str | None = None,
     ) -> None:
+        self.observations.append(
+            dict(
+                metric=metric_name,
+                value=value,
+                zscore=zscore,
+                tool_name=tool_name,
+                score=clamp(value)
+                if metric_name == "tool_distribution_drift"
+                else clamp(abs(zscore) / (self.z_threshold * 2.0)),
+            )
+        )
         if not self.store:
             return
         await self.store.record_behavior_stat(

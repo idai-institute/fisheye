@@ -21,3 +21,23 @@ def test_rules_and_scores_reject_unsafe_or_ambiguous_inputs():
         Rule(name="Mail", action="email", recipients=["a@example.org\nBcc:other@example.org"])
     with pytest.raises(ValueError):
         Rule(name="Too low", threshold=5, hysteresis=10)
+
+
+def test_behavior_measurements_are_available_below_alert_threshold():
+    import asyncio
+
+    from fisheye.analysis import AnalysisProcessor
+    from fisheye.schema.events import EventEnvelope
+
+    async def run():
+        processor = AnalysisProcessor()
+        result = await processor.analyze(
+            EventEnvelope(
+                event_type="llm.response", agent_id="a", run_id="r", payload={"latency_ms": 20, "token_count": 10}
+            )
+        )
+        channels = {signal.detector_id for signal in result.signals}
+        assert {"behavior.latency_ms", "behavior.token_count"} <= channels
+        assert not any(alert.category == "behavioral" for alert in result.alerts)
+
+    asyncio.run(run())

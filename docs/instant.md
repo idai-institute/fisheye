@@ -15,7 +15,7 @@ Without `--demo`, the page begins with connection instructions. Send events to `
 
 ## Understand the score
 
-Each workflow/environment has its own rolling five-minute window, based on local analysis time. Every detector signal contributes even when it is below the library's alert threshold. Behavior alerts and graph finding categories also contribute; findings that merely repeat detector alerts are excluded. Repeated observations in one channel contribute only its highest score. The combination is:
+Each workflow/environment has its own rolling five-minute window, based on local analysis time. Every detector signal contributes even when it is below the library's alert threshold. Behavior measurements (including measurements below alert thresholds) and graph finding categories also contribute; findings that merely repeat detector alerts are excluded. Repeated observations in one channel contribute only its highest score. The combination is:
 
 `100 × (1 − product(1 − channel_peak))`
 
@@ -60,3 +60,15 @@ Loopback is the default. Remote CLI binding requires both `FISHEYE__API__API_KEY
 `GET /instant/api/snapshot` returns score contributions, coverage, history, and the latest 50 action records. `GET/PUT /instant/api/settings` reads or changes rules/email settings; writes require the last returned `revision`, and conflicting edits return 409. Secrets are omitted from reads. `POST /instant/api/demo` is available only in demo mode.
 
 Keep one runtime/service owner per database. SQL analysis and file writes settle before cancellation releases ownership. The worker reports its last error in snapshot health and retries its polling loop after failures; it does not resend failed external actions. Signal inputs retain five minutes and chart history retains one day when new events arrive. Action history remains for inspection and has no automatic retention limit. Back up SQLite using the [operations guide](operations.md), monitor disk use, and protect the secret file with host permissions.
+
+## Browser verification
+
+The [browser smoke check](../tools/instant_browser_smoke.py) starts a temporary server, exercises the demo and shutdown rule editor, verifies persistence after reload, and captures desktop/mobile screenshots. Run it in an environment that permits local networking and Chromium processes:
+
+```bash
+python -m pip install -e '.[dev,instant]' playwright
+python -m playwright install chromium
+python tools/instant_browser_smoke.py
+```
+
+The CI workflow includes this check and uploads its screenshots. Local release validation distinguishes API/package checks from browser checks that require those environment capabilities.
