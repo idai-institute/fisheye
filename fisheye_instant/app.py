@@ -14,6 +14,7 @@ from pydantic import BaseModel, ConfigDict, Field, SecretStr
 
 from fisheye.api.app import create_app as library_app
 from fisheye.runtime import build_default_runtime
+from fisheye.state.tasks import complete_on_cancel
 from fisheye_instant.models import MailSettings, Rule
 from fisheye_instant.service import InstantService
 from fisheye_instant.store import Conflict
@@ -121,14 +122,19 @@ def create_app(runtime=None, config=None, stop_handlers=None, demo=False, mailer
             if rule.enabled and rule.action == "email" and not body.mail.host:
                 raise HTTPException(422, "Set up email delivery before enabling an email rule")
         try:
-            await asyncio.to_thread(service.store.save_settings, body.rules, body.mail, body.revision)
-            if body.password is not None:
-                await asyncio.to_thread(service.save_password, body.password.get_secret_value())
+            return await complete_on_cancel(
+                asyncio.to_thread(
+                    service.configure,
+                    body.rules,
+                    body.mail,
+                    body.revision,
+                    body.password.get_secret_value() if body.password is not None else None,
+                )
+            )
         except Conflict as exc:
             raise HTTPException(409, str(exc)) from exc
         except ValueError as exc:
             raise HTTPException(422, str(exc)) from exc
-        return await asyncio.to_thread(service.settings)
 
     @app.post("/instant/api/demo", dependencies=[Depends(writer)])
     async def demo_run():

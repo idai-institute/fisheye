@@ -135,3 +135,19 @@ def test_interrupted_shutdown_is_not_retried(tmp_path):
         runtime.close()
 
     asyncio.run(run())
+
+
+def test_rejected_settings_change_restores_password(tmp_path):
+    from fisheye_instant.store import Conflict
+
+    runtime = build_default_runtime(config(tmp_path))
+    service = InstantService(runtime)
+    service.save_password("original")
+    with pytest.raises(Conflict):
+        service.configure([], MailSettings(), 99, "stale-secret")
+    assert service.secret_path.read_text() == "original"
+    rule = Rule(id="duplicate", name="Warn")
+    with pytest.raises(ValueError):
+        service.configure([rule, rule], MailSettings(), 1, "rejected-secret")
+    assert service.secret_path.read_text() == "original"
+    runtime.close()

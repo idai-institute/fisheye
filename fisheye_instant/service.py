@@ -13,7 +13,7 @@ from pathlib import Path
 
 from fisheye.state.tasks import complete_on_cancel
 from fisheye_instant.models import MailSettings
-from fisheye_instant.store import InstantStore
+from fisheye_instant.store import Conflict, InstantStore
 
 
 class InstantService:
@@ -30,7 +30,7 @@ class InstantService:
             (key if isinstance(key, tuple) else ("local", key)): handler
             for key, handler in (stop_handlers or {}).items()
         }
-        self.mailer = mailer or self._send_mail
+        self.mailer = mailer
         self._worker = None
         self.worker_error = None
         digest = hashlib.sha256(self.store.application_id.encode()).hexdigest()[:12]
@@ -58,6 +58,25 @@ class InstantService:
                 dict(environment=env, workflow_id=workflow) for env, workflow in sorted(self.stop_handlers)
             ],
         )
+
+    def configure(self, rules, mail, revision, password=None):
+        # Keep the mail server and password snapshot consistent with workers.
+        with self.runtime.store._lock:
+            if self.store.settings()["revision"] != revision:
+                raise Conflict("Settings changed in another tab. Reload before saving.")
+            previous = self.secret_path.read_text() if self.secret_path.exists() else None
+            if password is not None:
+                self.save_password(password)
+            try:
+                self.store.save_settings(rules, mail, revision)
+            except BaseException:
+                if password is not None:
+                    if previous is None:
+                        self.secret_path.unlink(missing_ok=True)
+                    else:
+                        self.save_password(previous)
+                raise
+            return self.settings()
 
     async def start(self):
         # The runtime's analyzer lease must already be held before recovery.
@@ -99,10 +118,17 @@ class InstantService:
                 if json.loads(action["scope"])[1] == "demo":
                     await complete_on_cancel(asyncio.to_thread(self.store.finish, action["id"], "preview"))
                     return True
-                settings = MailSettings.model_validate(self.store.settings()["mail"])
+                with self.runtime.store._lock:
+                    settings = MailSettings.model_validate(self.store.settings()["mail"])
+                    password = self.secret_path.read_text() if self.secret_path.exists() else ""
                 if not settings.host or not settings.sender:
                     raise ValueError("Email delivery is not configured")
-                await complete_on_cancel(asyncio.to_thread(self.mailer, settings, action))
+                delivery = (
+                    asyncio.to_thread(self.mailer, settings, action)
+                    if self.mailer
+                    else asyncio.to_thread(self._send_mail, settings, action, password)
+                )
+                await complete_on_cancel(delivery)
             elif action["rule"]["action"] == "shutdown":
                 app, environment, workflow = json.loads(action["scope"])
                 handler = self.stop_handlers.get((environment, workflow))
@@ -126,7 +152,7 @@ class InstantService:
             await complete_on_cancel(asyncio.to_thread(self.store.finish, action["id"], "failed", type(exc).__name__))
         return True
 
-    def _send_mail(self, settings, action):
+    def _send_mail(self, settings, action, password=None):
         workflow = json.loads(action["scope"])[2]
         message = EmailMessage()
         message["Subject"] = f"Fisheye warning: anomaly score {action['score']:.0f}"
@@ -149,7 +175,8 @@ class InstantService:
                 smtp.starttls(context=context)
                 smtp.ehlo()
             if settings.username:
-                password = self.secret_path.read_text() if self.secret_path.exists() else ""
+                if password is None:
+                    password = self.secret_path.read_text() if self.secret_path.exists() else ""
                 if not password:
                     raise ValueError("SMTP password is missing")
                 smtp.login(settings.username, password)
