@@ -106,13 +106,13 @@ The local server binds to loopback. Configure `FISHEYE__API__API_KEY` for protec
 
 ## Integrations and development
 
-Optional extras: `server`, `langchain`, `openai-agents`, `camel`, `telemetry`, and `dev`. See the [tested integration matrix](docs/integrations.md) for exact versions, examples, and capability limits.
+Optional extras: `instant`, `server`, `langchain`, `openai-agents`, `camel`, `telemetry`, and `dev`. See the [tested integration matrix](docs/integrations.md) for exact versions, examples, and capability limits.
 
 ```bash
 python -m pip install -e '.[dev]'
 python -m pytest -q
-ruff check fisheye tools examples
-ruff format --check fisheye tools examples
+ruff check fisheye fisheye_instant tools examples
+ruff format --check fisheye fisheye_instant tools examples
 python -m build
 python tools/wheel_smoke.py
 python tools/benchmark.py --events 1000

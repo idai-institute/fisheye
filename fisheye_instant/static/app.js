@@ -153,7 +153,7 @@ $('#mail-form').onsubmit = async event => {
 };
 $('#demo-button').onclick = async () => { const button = $('#demo-button'); button.disabled = true; try {const result = await api('demo', {method:'POST', body:'{}'}); state.selection = JSON.stringify([result.workflow_id, result.environment]); await refresh(); toast('Sample workflow analyzed. Inspect its signals below.');} catch (error) {toast(error.message);} finally {button.disabled = state.snapshot && !state.snapshot.demo.running;} };
 $('#workflow-select').onchange = async event => {state.selection = event.target.value; try {await refresh();} catch (error) {toast(error.message);}};
-const example = `curl ${location.origin}/v1/events \\\n+  -H 'Content-Type: application/json' \\\n+  -d '{"event_type":"llm.message",
+const example = `curl ${location.origin}/v1/events \\\n  -H 'Content-Type: application/json' \\\n  -d '{"event_type":"llm.message",
        "agent_id":"my-agent",
        "run_id":"my-workflow",
        "payload":{"content":"Hello, Fisheye"}}'`;
