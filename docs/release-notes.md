@@ -1,5 +1,36 @@
 # Fisheye releases
 
+## 0.3.0
+
+Fisheye Instant adds a local web control room for unified anomaly scoring and configurable responses. Install `fisheye[instant]` and launch `fisheye-instant --demo` to try the complete workflow. See the [setup guide](instant.md).
+
+- The dashboard combines detector signals, continuous behavior measurements, and graph findings into a 0–100 score per workflow/environment. It exposes contributing evidence, recent history, detector coverage, stale data, and response outcomes. Duplicate observations in one channel do not accumulate.
+- Warning, email, and host-registered shutdown rules support independent thresholds, cooldowns, and rearm margins. Score updates and queued responses share the analysis transaction. Rule changes cancel unclaimed old actions; interrupted external actions remain visible for manual outcome checks.
+- SMTP delivery requires TLS and keeps passwords outside SQLite and API responses. Revision checks protect concurrent settings edits, and rejected updates restore the previous password. Shutdown callbacks are bound to a registered workflow/environment and receive an idempotency key.
+- The responsive interface includes rule editing, email setup, connection examples, and a sample workflow processed by the real detectors. The existing investigation dashboard and API remain available. Remote CLI binding requires separate API and reviewer credentials.
+- Continuous behavior measurements now reach the unified score below the legacy alert threshold; existing library alert thresholds remain unchanged. Coverage is reset for each analyzed event to avoid reporting a previous event's detector status.
+
+### Local verification
+
+| Check | Result |
+| --- | --- |
+| Python 3.12 with all four optional integrations | 140 passed; eight upstream Camel deprecation warnings |
+| Python 3.10 and 3.13 core/server environments | 135 passed and five optional integration tests skipped on each |
+| Ruff lint/format and JavaScript syntax | Passed |
+| Wheel and source archive | Built using locally available dependencies |
+| Fresh core/server wheel installs | Passed, including Instant assets, CLI and service lifecycle |
+| API and response behavior | Authentication, revision conflicts, rollback, demo flow, TLS mail transport, shutdown scope, and interruption recovery passed |
+| Offline regression corpus | Seven of seven assessed scenarios passed |
+| Documentation and examples | Three Python snippets, both runnable examples, relative links and the copyable connection command passed |
+
+The [validation record](validation/release-checks-0.3.0.json) records these local checks. The restricted environment required a temporary OS-pipe adapter for asyncio wake-ups; database transactions and worker threads ran normally. Chromium could not launch under the environment's process/IPC restrictions, so visual and browser interaction verification was not completed locally. A browser smoke job is defined in CI; no hosted CI execution is implied. Mail transport was exercised with a test SMTP implementation, without sending external email.
+
+### Upgrade and operating limits
+
+Stop the existing analyzer and back up the database before upgrading. Instant adds its own tables to the existing version 2 database. Score projections and responses begin with newly analyzed events; attaching Instant does not replay earlier events or take retroactive action. Keep one runtime/service owner per database and run the ASGI app with one worker.
+
+Scores are inspectable heuristics, not calibrated probabilities. Email has no exactly-once guarantee, and real agent shutdown requires a host callback. The demo email action records a preview; the demo shutdown hook stops future sample runs. Action history has no automatic retention limit. This release does not establish new throughput results, a 24-hour soak result, distributed operation, or multi-tenant identity support.
+
 ## 0.2.2
 
 This release adds an application-scoped audit reader and fixes interruption, capture, query, and replay behavior discovered after 0.2.1.
